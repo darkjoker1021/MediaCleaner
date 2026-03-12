@@ -10,9 +10,14 @@ class DuplicateSummaryBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ctrl = Get.find<DuplicatesController>();
+    // FIX: un solo Obx al posto di Obx > ... > Obx annidato
+    // L'Obx esterno copriva già selectedIds; il secondo era ridondante
+    // e causava un rebuild extra dell'intera Row per ogni cambio.
     return Obx(() {
       final selected = ctrl.selectedIds.length;
       final waste    = ctrl.selectedWasteBytes;
+      final allSelected = selected == ctrl.totalDuplicateCount;
+
       return Container(
         margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -39,22 +44,14 @@ class DuplicateSummaryBanner extends StatelessWidget {
             ]),
           ),
           GestureDetector(
-            onTap: () {
-              if (ctrl.selectedIds.length == ctrl.totalDuplicateCount) {
-                ctrl.clearSelection();
-              } else {
-                ctrl.selectAllDuplicates();
-              }
-            },
-            child: Obx(() => Text(
-              ctrl.selectedIds.length == ctrl.totalDuplicateCount
-                  ? 'Deseleziona'
-                  : 'Seleziona tutti',
+            onTap: allSelected ? ctrl.clearSelection : ctrl.selectAllDuplicates,
+            child: Text(
+              allSelected ? 'Deseleziona' : 'Seleziona tutti',
               style: const TextStyle(
                   color: Color(0xFFFF9F0A),
                   fontSize: 12,
                   fontWeight: FontWeight.w700),
-            )),
+            ),
           ),
         ]),
       );

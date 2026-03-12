@@ -148,14 +148,14 @@ class _PhotoDetailViewState extends State<PhotoDetailView> {
                           // Thumbnail come placeholder
                           if (item.thumbnail != null)
                             SafeMemoryImage(
-                                bytes: item.thumbnail!, fit: BoxFit.cover),
+                                bytes: item.thumbnail!, fit: BoxFit.cover, cacheWidth: 300),
                           // Full-res crossfade in
                           if (_fullThumb != null)
                             AnimatedOpacity(
                               opacity: _loadingFull ? 0.0 : 1.0,
                               duration: const Duration(milliseconds: 400),
                               child: SafeMemoryImage(
-                                  bytes: _fullThumb!, fit: BoxFit.cover),
+                                  bytes: _fullThumb!, fit: BoxFit.cover, cacheWidth: 300),
                             ),
                         ])
                       : const Center(

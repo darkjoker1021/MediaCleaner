@@ -9,7 +9,7 @@ class _Rec { const _Rec(this.id, this.type); final String id; final _Action type
 
 class HomeController extends GetxController implements IMediaController {
   final _service    = PhotoService();
-  final _cache      = CacheService();
+  CacheService get _cache => Get.find<CacheService>();
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
   // ── IMediaController ──────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ class HomeController extends GetxController implements IMediaController {
     }
 
     final raw    = await _service.loadAllPhotos();
-    final sorted = await _service.sort(raw, currentSort.value);
+    final sorted = _service.sort(raw, currentSort.value);
     allItems.assignAll(sorted);
 
     _keptIds  = Set.from(_cache.getKeptIds());
@@ -92,12 +92,12 @@ class HomeController extends GetxController implements IMediaController {
   }
 
   @override
-  Future<void> setSortMode(SortMode mode) async {
-    if (currentSort.value == mode) return;
-    currentSort.value = mode;
-    allItems.assignAll(await _service.sort(allItems.toList(), mode));
-    keptItems.assignAll(await _service.sort(keptItems.toList(), mode));
-  }
+   Future<void> setSortMode(SortMode mode) async {
+     if (currentSort.value == mode) return;
+     currentSort.value = mode;
+     allItems.assignAll(_service.sort(allItems.toList(), mode));
+     keptItems.assignAll(_service.sort(keptItems.toList(), mode));
+   }
 
   // ── Swipe ─────────────────────────────────────────────────────────────────
   @override
@@ -211,7 +211,7 @@ class HomeController extends GetxController implements IMediaController {
     keptCount.value = 0; trashCount.value = 0;
     _history.clear(); canUndo.value = false;
     await _cache.clearAll();
-    allItems.assignAll(await _service.sort(allItems.toList(), currentSort.value));
+    allItems.assignAll(_service.sort(allItems.toList(), currentSort.value));
     isLoading.value = false;
   }
 

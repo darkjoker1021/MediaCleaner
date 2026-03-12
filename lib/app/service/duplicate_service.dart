@@ -2,36 +2,42 @@ import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'package:media_cleaner/app/models/photo_item.dart';
 
+/// Gruppo di foto considerate duplicate.
+/// Tutti i campi derivati sono calcolati UNA SOLA VOLTA nel costruttore
+/// (late final) invece di rieseguire reduce/where/fold ad ogni lettura.
 class DuplicateGroup {
-  final List<PhotoItem> items;
-  final bool isPerceptual;
-  DuplicateGroup(this.items, {this.isPerceptual = false});
+  DuplicateGroup(this.items, {this.isPerceptual = false})
+      : best = items.reduce((a, b) => a.sizeBytes >= b.sizeBytes ? a : b) {
+    // late final calcolati subito — mai più di una volta per istanza
+    duplicates = List.unmodifiable(items.where((i) => i.id != best.id));
+    wasteBytes = duplicates.fold(0, (s, e) => s + e.sizeBytes);
+    totalBytes = items.fold(0, (s, e) => s + e.sizeBytes);
+  }
 
-  PhotoItem get best =>
-      items.reduce((a, b) => a.sizeBytes >= b.sizeBytes ? a : b);
-  List<PhotoItem> get duplicates =>
-      items.where((i) => i.id != best.id).toList();
-  int get wasteBytes => duplicates.fold(0, (s, e) => s + e.sizeBytes);
-  int get totalBytes => items.fold(0, (s, e) => s + e.sizeBytes);
+  final List<PhotoItem> items;
+  final bool            isPerceptual;
+  final PhotoItem       best;
+  late final List<PhotoItem> duplicates;
+  late final int wasteBytes;
+  late final int totalBytes;
   int get count => items.length;
 }
 
 class DuplicateService {
   static const _phashThreshold = 8;
 
-  // Precomputed integer channel weights (×1000)
+  // Pesi canale pre-calcolati come interi (×1000) — evita moltiplicazioni FP ripetute
   static const int _wr = 299, _wg = 587, _wb = 114;
 
   List<DuplicateGroup> findDuplicates(List<PhotoItem> items) {
     final groups       = <DuplicateGroup>[];
     final processedIds = <String>{};
 
-    // ── Pass 1: exact match (size + truncated-minute timestamp) ──────────────
+    // ── Pass 1: exact match (size + timestamp al minuto) ─────────────────────
     final exactMap = <String, List<PhotoItem>>{};
     for (final item in items) {
       if (item.sizeBytes <= 0) continue;
       final dt  = item.createdAt;
-      // Build key using integer arithmetic — no string interpolation per digit
       final key =
           '${item.sizeBytes}_${dt.year}${_p(dt.month)}${_p(dt.day)}${_p(dt.hour)}${_p(dt.minute)}';
       exactMap.putIfAbsent(key, () => []).add(item);
@@ -50,14 +56,13 @@ class DuplicateService {
         .toList();
 
     if (unprocessed.isNotEmpty) {
-      // Build hash map
       final hashes = <String, int>{};
       for (final item in unprocessed) {
         final h = computeAHash(item.thumbnail!);
         if (h != 0) hashes[item.id] = h;
       }
 
-      // Convert to parallel arrays for cache-friendly access
+      // Array paralleli cache-friendly per il loop O(n²)
       final hashItems  = [for (final i in unprocessed) if (hashes.containsKey(i.id)) i];
       final hashValues = Int64List.fromList([for (final i in hashItems) hashes[i.id]!]);
 
@@ -65,7 +70,6 @@ class DuplicateService {
       for (int i = 0; i < hashItems.length; i++) {
         final item = hashItems[i];
         if (used.contains(item.id)) continue;
-
         final group = [item];
         final ha    = hashValues[i];
         for (int j = i + 1; j < hashItems.length; j++) {
@@ -87,8 +91,8 @@ class DuplicateService {
     return groups;
   }
 
-  /// Average Hash — 64-bit perceptual fingerprint.
-  /// Uses integer arithmetic throughout to avoid repeated FP conversions.
+  /// Average Hash (aHash) — fingerprint percettivo a 64 bit.
+  /// Usa aritmetica intera per evitare conversioni FP ripetute.
   int computeAHash(Uint8List bytes) {
     try {
       final decoded = img.decodeImage(bytes);
@@ -96,7 +100,6 @@ class DuplicateService {
       final small = img.copyResize(decoded, width: 8, height: 8,
           interpolation: img.Interpolation.nearest);
 
-      // Compute all 64 luminances as integers (×1000) in one pass
       final lums = Int32List(64);
       int sum = 0;
       for (int i = 0; i < 64; i++) {
@@ -105,9 +108,8 @@ class DuplicateService {
         lums[i]  = lum;
         sum      += lum;
       }
-      final mean = sum ~/ 64; // still ×1000
+      final mean = sum ~/ 64;
 
-      // Build hash: bit=1 if lum >= mean
       int hash = 0;
       for (int i = 0; i < 64; i++) {
         if (lums[i] >= mean) hash |= (1 << i);
@@ -118,7 +120,7 @@ class DuplicateService {
     }
   }
 
-  /// Isolate-compatible batch hash computation.
+  /// Batch hash computation per isolate.
   static Map<String, int> computeAllHashes(List<(String, Uint8List)> input) {
     final svc    = DuplicateService();
     final result = <String, int>{};

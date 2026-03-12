@@ -5,12 +5,10 @@ import 'package:get/get.dart';
 import 'package:media_cleaner/app/modules/blur/controllers/blur_controller.dart';
 import 'package:media_cleaner/app/modules/shared/photo_detail.dart';
 import 'package:media_cleaner/app/service/blur_service.dart';
-import 'package:media_cleaner/app/service/photo_service.dart';
 import 'package:media_cleaner/core/widgets/safe_memory_image.dart';
 import 'package:media_cleaner/core/widgets/shimmer_box.dart';
 
-/// 3-column photo grid for [BlurView]. Each cell shows a quality-issue badge
-/// and supports single tap (detail/select) and long-press (start selection).
+/// Griglia foto 3 colonne per [BlurView].
 class BlurGrid extends GetView<BlurController> {
   final List<BlurItem> items;
 
@@ -37,140 +35,120 @@ class BlurGrid extends GetView<BlurController> {
 
 class _BlurGridItem extends GetView<BlurController> {
   final BlurItem blurItem;
-
   const _BlurGridItem({required this.blurItem});
 
   @override
   Widget build(BuildContext context) {
     final item = blurItem.item;
-    return Obx(() {
-      final isSelected = controller.selectedIds.contains(item.id);
-      return GestureDetector(
-        onLongPress: () {
-          HapticFeedback.mediumImpact();
-          if (!controller.isSelecting.value) controller.isSelecting.value = true;
+
+    return GestureDetector(
+      onLongPress: () {
+        HapticFeedback.mediumImpact();
+        if (!controller.isSelecting.value) controller.isSelecting.value = true;
+        controller.toggleSelect(item.id);
+      },
+      onTap: () {
+        if (controller.isSelecting.value) {
           controller.toggleSelect(item.id);
-        },
-        onTap: () {
-          if (controller.isSelecting.value) {
-            controller.toggleSelect(item.id);
-          } else {
-            PhotoDetailView.open(
-              item: item,
-              loadFull: (it) async {
-                final resolved = await controller.loadFullThumb(it);
-                return resolved.thumbnail;
-              },
-              actions: [
-                detailAction(
-                  label: 'Cestino',
-                  color: const Color(0xFFFF3B30),
-                  icon: FluentIcons.delete_20_filled,
-                  onTap: () {
-                    Get.back();
-                    controller.moveToTrash(item.id);
-                  },
-                ),
-              ],
-            );
-          }
-        },
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: isSelected ? const Color(0xFF5AC8FA) : Colors.transparent,
-              width: 2.5,
-            ),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Stack(fit: StackFit.expand, children: [
-              item.thumbnail != null
-                  ? SafeMemoryImage(bytes: item.thumbnail!, fit: BoxFit.cover, cacheWidth: 200)
-                  : const ShimmerBox(),
-              // Quality issue badge
-              Positioned(
-                top: 4,
-                left: 4,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: _issueColor(blurItem.issue).withValues(alpha: 0.85),
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                  child: Text(
-                    _issueLabel(blurItem.issue),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 8,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
+        } else {
+          PhotoDetailView.open(
+            item: item,
+            loadFull: (it) async {
+              final resolved = await controller.loadFullThumb(it);
+              return resolved.thumbnail;
+            },
+            actions: [
+              detailAction(
+                label: 'Cestino',
+                color: const Color(0xFFFF3B30),
+                icon: FluentIcons.delete_20_filled,
+                onTap: () {
+                  Get.back();
+                  controller.moveToTrash(item.id);
+                },
               ),
-              // Selection indicator
-              if (controller.isSelecting.value)
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: 20,
-                    height: 20,
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? const Color(0xFF5AC8FA)
-                          : Colors.black.withValues(alpha: 0.4),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white70, width: 1.5),
-                    ),
-                    child: isSelected
-                        ? const Icon(FluentIcons.checkmark_20_filled, color: Colors.white, size: 12)
-                        : null,
-                  ),
-                ),
-              // Size label
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.transparent, Colors.black.withValues(alpha: 0.7)],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                    ),
-                  ),
-                  child: Text(
-                    PhotoService.formatBytes(item.sizeBytes),
-                    style: TextStyle(
-                      color: PhotoService.sizeColor(item.sizeBytes),
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-            ]),
-          ),
+            ],
+          );
+        }
+      },
+      // FIX: Obx ora avvolge SOLO il bordo/overlay di selezione, non l'intera cella.
+      // La thumbnail e il badge rimangono fuori dall'Obx e non vengono ricostruiti
+      // ad ogni cambio di selectedIds — solo l'AnimatedContainer del bordo si aggiorna.
+      child: Stack(fit: StackFit.expand, children: [
+        // ── Thumbnail (stabile, fuori dall'Obx) ───────────────────────────
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: item.thumbnail != null
+              ? SafeMemoryImage(
+                  bytes: item.thumbnail!,
+                  fit: BoxFit.cover,
+                  cacheHeight: 300,
+                )
+              : const ShimmerBox(),
         ),
-      );
-    });
+
+        // ── Badge issue (stabile) ──────────────────────────────────────────
+        Positioned(
+          bottom: 4,
+          left: 4,
+          child: _IssueBadge(issue: blurItem.issue),
+        ),
+
+        // ── Overlay selezione (unica parte reattiva) ──────────────────────
+        Obx(() {
+          final isSelected = controller.selectedIds.contains(item.id);
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isSelected
+                    ? const Color(0xFF5AC8FA)
+                    : Colors.transparent,
+                width: 2.5,
+              ),
+              color: isSelected
+                  ? const Color(0xFF5AC8FA).withValues(alpha: 0.15)
+                  : Colors.transparent,
+            ),
+            child: isSelected
+                ? const Align(
+                    alignment: Alignment.topRight,
+                    child: Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(FluentIcons.checkmark_circle_20_filled,
+                          color: Color(0xFF5AC8FA), size: 18),
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          );
+        }),
+      ]),
+    );
   }
+}
 
-  Color _issueColor(QualityIssue issue) => switch (issue) {
-    QualityIssue.blur        => Colors.purple,
-    QualityIssue.dark        => Colors.amber.shade700,
-    QualityIssue.overexposed => Colors.orange,
-  };
+/// Badge colorato per il tipo di problema qualità.
+class _IssueBadge extends StatelessWidget {
+  final QualityIssue issue;
+  const _IssueBadge({required this.issue});
 
-  String _issueLabel(QualityIssue issue) => switch (issue) {
-    QualityIssue.blur        => 'SFOCATA',
-    QualityIssue.dark        => 'SCURA',
-    QualityIssue.overexposed => 'SOVRAESPOST.',
-  };
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (issue) {
+      QualityIssue.blur        => ('Sfocata',     Colors.purple),
+      QualityIssue.dark        => ('Scura',        Colors.amber),
+      QualityIssue.overexposed => ('Sovraesposta', Colors.orange),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(label,
+          style: const TextStyle(color: Colors.white, fontSize: 9,
+              fontWeight: FontWeight.w700)),
+    );
+  }
 }

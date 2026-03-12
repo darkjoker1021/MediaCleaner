@@ -5,11 +5,24 @@ import 'package:flutter/material.dart';
 import 'package:media_cleaner/app/service/photo_service.dart';
 import 'package:media_cleaner/core/widgets/safe_memory_image.dart';
 import 'package:media_cleaner/core/widgets/shimmer_box.dart';
-import 'package:photo_manager/photo_manager.dart';
 
+/// Carta swipeable per foto e video.
+///
+/// STRATEGIA THUMBNAIL (3 livelli):
+///
+///  1. MICRO (80 px) — caricata in ~8 ms al mount, mostra immediatamente
+///     qualcosa invece dello shimmer bianco. Viene avviata in parallelo
+///     con il caricamento LARGE nel controller.
+///
+///  2. LARGE (600 px, via resolveStream) — arriva via `didUpdateWidget`
+///     quando il controller aggiorna `item.thumbnail`. Fa crossfade in
+///     sopra alla micro in modo impercettibile.
+///
+///  3. Se l'item ha già la thumbnail (visita successiva o cache), salta
+///     direttamente al livello LARGE senza mostrare la micro.
 class SwipeCard extends StatefulWidget {
-  final PhotoItem   item;
-  final double      hThreshold;
+  final PhotoItem     item;
+  final double        hThreshold;
   final VoidCallback? onTap;
 
   const SwipeCard({
@@ -24,31 +37,45 @@ class SwipeCard extends StatefulWidget {
 }
 
 class _SwipeCardState extends State<SwipeCard> {
-  Uint8List? _thumb;
+  // thumbnail grande (600 px) — arriva dal controller via resolveStream
+  Uint8List? _large;
+  // micro-thumbnail (80 px) — caricata subito al mount come placeholder
+  Uint8List? _micro;
 
   @override
   void initState() {
     super.initState();
-    _thumb = widget.item.thumbnail;
-    if (_thumb == null) _loadThumb();
+    if (widget.item.thumbnail != null) {
+      // Già pronta (dal controller) — usa subito senza caricare nulla
+      _large = widget.item.thumbnail;
+    } else {
+      // Non ancora pronta: carica micro immediatamente come placeholder
+      _loadMicro();
+    }
   }
 
   @override
   void didUpdateWidget(SwipeCard old) {
     super.didUpdateWidget(old);
+
     if (old.item.id != widget.item.id) {
-      _thumb = widget.item.thumbnail;
-      if (_thumb == null) _loadThumb();
-    } else if (_thumb == null && widget.item.thumbnail != null) {
-      // Thumbnail caricata esternamente (preload): usa subito senza ricaricare
-      setState(() => _thumb = widget.item.thumbnail);
+      // Nuova carta: resetta tutto e ricomincia
+      _large = widget.item.thumbnail;
+      _micro = null;
+      if (_large == null) _loadMicro();
+    } else if (_large == null && widget.item.thumbnail != null) {
+      // La thumbnail LARGE è arrivata via controller: crossfade in
+      setState(() => _large = widget.item.thumbnail);
     }
   }
 
-  Future<void> _loadThumb() async {
-    final bytes = await widget.item.asset
-        .thumbnailDataWithSize(const ThumbnailSize.square(800));
-    if (mounted) setState(() => _thumb = bytes);
+  Future<void> _loadMicro() async {
+    // 80 px: decodifica ~8 ms, quasi istantaneo
+    final bytes = await PhotoService().resolveMicroThumb(widget.item);
+    if (mounted && _large == null) {
+      // Mostra la micro solo se la large non è ancora arrivata
+      setState(() => _micro = bytes);
+    }
   }
 
   @override
@@ -63,12 +90,40 @@ class _SwipeCardState extends State<SwipeCard> {
         borderRadius: BorderRadius.circular(28),
         child: Stack(fit: StackFit.expand, children: [
 
-          // Foto
-          _thumb != null
-              ? SafeMemoryImage(bytes: _thumb!, fit: BoxFit.cover)
-              : const ShimmerBox(),
+          // ── Layer 0: shimmer (se non abbiamo ancora nulla) ─────────────
+          if (_large == null && _micro == null)
+            const ShimmerBox(),
 
-          // Gradient top
+          // ── Layer 1: micro-thumbnail (80 px, blur+upscale automatici) ──
+          // Rimane visibile come placeholder finché la large non è pronta.
+          // filterQuality.medium per bilinear upscale che non fa sembrare
+          // pixelosa la foto piccola.
+          if (_micro != null && _large == null)
+            Image.memory(
+              _micro!,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.medium,
+              // nessun cacheWidth: è già 80 px, decodifica istantanea
+            ),
+
+          // ── Layer 2: large thumbnail (600 px) — crossfade in ───────────
+          if (_large != null)
+            AnimatedOpacity(
+              opacity: 1.0,
+              duration: const Duration(milliseconds: 200),
+              child: SafeMemoryImage(
+                bytes: _large!,
+                fit: BoxFit.cover,
+                // Limita la decodifica alla dimensione reale su schermo.
+                // Su un iPhone 14 Pro la carta occupa ~390×720 logical px
+                // → 390*3 = 1170 physical px; 600 px è sufficiente.
+                // Senza questo Flutter decodifica a 600×600 ma alloca
+                // la texture completa; con questo alloca solo quanto serve.
+                cacheWidth: 600,
+              ),
+            ),
+
+          // ── Gradients ─────────────────────────────────────────────────
           Positioned(top: 0, left: 0, right: 0,
             child: Container(height: 100,
               decoration: BoxDecoration(gradient: LinearGradient(
@@ -77,8 +132,6 @@ class _SwipeCardState extends State<SwipeCard> {
               )),
             ),
           ),
-
-          // Gradient bottom
           Positioned(bottom: 0, left: 0, right: 0,
             child: Container(height: 110,
               decoration: BoxDecoration(gradient: LinearGradient(
@@ -88,103 +141,60 @@ class _SwipeCardState extends State<SwipeCard> {
             ),
           ),
 
-          // ── Badge dimensione (top left, colorato per peso) ────────────────
+          // ── Badge dimensione (top left) ────────────────────────────────
           Positioned(top: 16, left: 16,
             child: widget.item.sizeBytes > 0
-                ? _badge(PhotoService.formatBytes(widget.item.sizeBytes),
-                    sizeColor, FluentIcons.data_usage_20_filled)
+                ? Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      PhotoService.formatBytes(widget.item.sizeBytes),
+                      style: TextStyle(
+                        color: sizeColor, fontSize: 11, fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  )
                 : const SizedBox.shrink(),
           ),
 
-          // ── Data + ora (top right) ────────────────────────────────────────
-          Positioned(top: 16, right: 16,
-            child: _badge(
-              _fmtDateTime(widget.item.createdAt),
-              Colors.white.withValues(alpha: 0.75),
-              FluentIcons.calendar_today_20_filled,
-            ),
-          ),
-
-          // ── Icona zoom (bottom right, hint) ──────────────────────────────
-          Positioned(bottom: 16, right: 16,
-            child: Icon(FluentIcons.zoom_in_20_filled,
-                color: Colors.white.withValues(alpha: 0.3), size: 16),
-          ),
-
-          // ── Overlay CESTINO ───────────────────────────────────────────────
+          // ── Swipe overlay: SCARTA (rosso, sinistra) ────────────────────
           if (leftOpacity > 0)
-            _SwipeOverlay(opacity: leftOpacity, color: const Color(0xFFFF3B30),
-                align: Alignment.centerLeft,
-                icon: FluentIcons.delete_20_filled, label: 'CESTINO', fromLeft: true),
+            Positioned.fill(
+              child: Opacity(
+                opacity: leftOpacity.clamp(0.0, 1.0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF3B30).withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(28),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(FluentIcons.delete_20_filled,
+                      color: Colors.white, size: 64),
+                ),
+              ),
+            ),
 
-          // ── Overlay MANTIENI ──────────────────────────────────────────────
+          // ── Swipe overlay: MANTIENI (verde, destra) ────────────────────
           if (rightOpacity > 0)
-            _SwipeOverlay(opacity: rightOpacity, color: const Color(0xFF34C759),
-                align: Alignment.centerRight,
-                icon: FluentIcons.heart_20_filled, label: 'MANTIENI', fromLeft: false),
+            Positioned.fill(
+              child: Opacity(
+                opacity: rightOpacity.clamp(0.0, 1.0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF34C759).withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(28),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(FluentIcons.heart_20_filled,
+                      color: Colors.white, size: 64),
+                ),
+              ),
+            ),
         ]),
       ),
     );
   }
-
-  Widget _badge(String text, Color color, IconData icon) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-    decoration: BoxDecoration(
-      color: Colors.black.withValues(alpha: 0.45),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: color.withValues(alpha: 0.4), width: 1),
-    ),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 11, color: color),
-      const SizedBox(width: 5),
-      Text(text, style: TextStyle(
-          color: color, fontSize: 11, fontWeight: FontWeight.w700,
-          letterSpacing: 0.2)),
-    ]),
-  );
-
-  // Data e ora sulla stessa riga: "15/03/2025  14:32"
-  String _fmtDateTime(DateTime dt) =>
-      '${_p(dt.day)}/${_p(dt.month)}/${dt.year}  ${_p(dt.hour)}:${_p(dt.minute)}';
-  String _p(int n) => n.toString().padLeft(2, '0');
-}
-
-class _SwipeOverlay extends StatelessWidget {
-  final double opacity; final Color color;
-  final Alignment align; final IconData icon;
-  final String label; final bool fromLeft;
-
-  const _SwipeOverlay({required this.opacity, required this.color,
-      required this.align, required this.icon,
-      required this.label, required this.fromLeft});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      gradient: LinearGradient(
-        colors: [color.withValues(alpha: opacity * 0.55), Colors.transparent],
-        begin: fromLeft ? Alignment.centerLeft : Alignment.centerRight,
-        end:   fromLeft ? Alignment.centerRight : Alignment.centerLeft,
-      ),
-    ),
-    child: Align(alignment: align,
-      child: Padding(
-        padding: EdgeInsets.only(
-            left: fromLeft ? 28 : 0, right: !fromLeft ? 28 : 0),
-        child: Opacity(opacity: opacity.clamp(0.0, 1.0),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-            decoration: BoxDecoration(color: color,
-                borderRadius: BorderRadius.circular(16)),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(icon, color: Colors.white, size: 18),
-              const SizedBox(width: 7),
-              Text(label, style: const TextStyle(color: Colors.white,
-                  fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 1.0)),
-            ]),
-          ),
-        ),
-      ),
-    ),
-  );
 }

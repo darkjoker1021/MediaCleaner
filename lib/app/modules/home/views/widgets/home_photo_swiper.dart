@@ -8,8 +8,8 @@ import 'package:media_cleaner/app/modules/shared/photo_detail.dart';
 import 'package:media_cleaner/core/widgets/swipe_card.dart';
 import 'home_done_screen.dart';
 
-/// Card swiper used in the photo tab of [HomeView].
-/// Shows [HomeDoneScreen] when no pending items remain.
+/// Card swiper usato nel tab foto di [HomeView].
+/// Mostra [HomeDoneScreen] quando non ci sono più elementi pendenti.
 class HomePhotoSwiper extends StatefulWidget {
   const HomePhotoSwiper({super.key});
 
@@ -18,14 +18,14 @@ class HomePhotoSwiper extends StatefulWidget {
 }
 
 class _HomePhotoSwiperState extends State<HomePhotoSwiper> {
-  late final HomeController _ctrl;
+  late final HomeController      _ctrl;
   late final CardSwiperController _sc;
 
   @override
   void initState() {
     super.initState();
     _ctrl = Get.find<HomeController>();
-    _sc = CardSwiperController();
+    _sc   = CardSwiperController();
     _ctrl.attachSwiperUndo(() => _sc.undo());
   }
 
@@ -39,11 +39,18 @@ class _HomePhotoSwiperState extends State<HomePhotoSwiper> {
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-      // Track allItems and currentSort so any change triggers a rebuild
-      final pending = _ctrl.pendingItems;
+      // Dipende da allItems (per thumbnail aggiornate) e currentSort
       _ctrl.currentSort.value;
+      final allItems = _ctrl.allItems;
+      final pending  = _ctrl.pendingItems;
 
       if (pending.isEmpty) return const HomeDoneScreen();
+
+      // FIX: indice O(1) su allItems costruito UNA VOLTA per rebuild,
+      // non O(n) dentro cardBuilder per ogni card.
+      final allItemsIndex = <String, int>{
+        for (var i = 0; i < allItems.length; i++) allItems[i].id: i,
+      };
 
       final key = '${pending.length}_${_ctrl.currentSort.value.index}';
       return CardSwiper(
@@ -70,10 +77,15 @@ class _HomePhotoSwiperState extends State<HomePhotoSwiper> {
         },
         cardBuilder: (context, index, hThreshold, vThreshold) {
           if (index >= pending.length) return const SizedBox.shrink();
+
           final stale = pending[index];
-          final item =
-              _ctrl.allItems.firstWhereOrNull((p) => p.id == stale.id) ??
-                  stale;
+
+          // FIX: lookup O(1) invece di firstWhereOrNull O(n) per ogni card.
+          // Usa l'elemento aggiornato da allItems (thumbnail fresca),
+          // fallback allo stale se l'id non è più presente.
+          final idx  = allItemsIndex[stale.id];
+          final item = idx != null ? allItems[idx] : stale;
+
           return SwipeCard(
             item: item,
             hThreshold: hThreshold.toDouble(),

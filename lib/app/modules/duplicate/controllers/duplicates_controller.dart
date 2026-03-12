@@ -25,9 +25,14 @@ class DuplicatesController extends GetxController {
   int get totalWasteBytes     => groups.fold(0, (s, g) => s + g.wasteBytes);
   int get totalDuplicateCount => groups.fold(0, (s, g) => s + g.duplicates.length);
 
+  // FIX: indice size memoizzato — non ricostruisce la mappa ad ogni accesso
+  Map<String, int>? _sizeIndex;
+  Map<String, int> get _getSizeIndex =>
+      _sizeIndex ??= {for (final p in _home.allItems) p.id: p.sizeBytes};
+  void _invalidateSizeIndex() => _sizeIndex = null;
+
   int get selectedWasteBytes {
-    // Build lookup from allItems once
-    final index = {for (final p in _home.allItems) p.id: p.sizeBytes};
+    final index = _getSizeIndex;
     return selectedIds.fold(0, (s, id) => s + (index[id] ?? 0));
   }
 
@@ -42,6 +47,7 @@ class DuplicatesController extends GetxController {
   @override
   void onClose() {
     selectedIds.clear();
+    _sizeIndex = null;
     super.onClose();
   }
 
@@ -51,6 +57,7 @@ class DuplicatesController extends GetxController {
     isScanning.value   = true;
     scanProgress.value = 0;
     selectedIds.clear();
+    _invalidateSizeIndex();
     await Future.delayed(Duration.zero);
 
     final allCandidates = _home.allItems.where((p) => p.sizeBytes > 0).toList();
@@ -70,6 +77,7 @@ class DuplicatesController extends GetxController {
     isScanning.value   = true;
     scanProgress.value = 0;
     selectedIds.clear();
+    _invalidateSizeIndex();
     await Future.delayed(Duration.zero);
 
     final allCandidates = _home.allItems.where((p) => p.sizeBytes > 0).toList();
@@ -92,7 +100,7 @@ class DuplicatesController extends GetxController {
   Future<List<DuplicateGroup>> _runDuplicateScan(List<PhotoItem> items) async {
     scanProgress.value = 0.0;
     final processedIds = <String>{};
-    final groups       = <DuplicateGroup>[];
+    final result       = <DuplicateGroup>[];
 
     // ── Pass 1: exact match (size + minute-resolution timestamp) ─────────────
     final exactMap = <String, List<PhotoItem>>{};
@@ -105,7 +113,7 @@ class DuplicatesController extends GetxController {
     }
     for (final g in exactMap.values) {
       if (g.length < 2) continue;
-      groups.add(DuplicateGroup(g));
+      result.add(DuplicateGroup(g));
       for (final i in g) {
         processedIds.add(i.id);
       }
@@ -121,15 +129,15 @@ class DuplicatesController extends GetxController {
       final allHashes = <String, int>{};
 
       for (int i = 0; i < unprocessed.length; i += _phashChunkSize) {
-        final end   = min(i + _phashChunkSize, unprocessed.length);
-        final chunk = unprocessed.sublist(i, end);
-        final input = [for (final item in chunk) (item.id, item.thumbnail!)];
+        final end    = min(i + _phashChunkSize, unprocessed.length);
+        final chunk  = unprocessed.sublist(i, end);
+        final input  = [for (final item in chunk) (item.id, item.thumbnail!)];
         final hashes = await compute(DuplicateService.computeAllHashes, input);
         allHashes.addAll(hashes);
         scanProgress.value = 0.2 + 0.7 * (end / unprocessed.length);
       }
 
-      // Convert to parallel arrays for cache-friendly inner loop
+      // Array paralleli cache-friendly per il loop interno O(n²)
       final hashItems  = [for (final i in unprocessed) if (allHashes.containsKey(i.id)) i];
       final hashValues = Int64List.fromList(
           [for (final i in hashItems) allHashes[i.id]!]);
@@ -151,30 +159,21 @@ class DuplicatesController extends GetxController {
         }
         if (group.length >= 2) {
           used.add(item.id);
-          groups.add(DuplicateGroup(group, isPerceptual: true));
+          result.add(DuplicateGroup(group, isPerceptual: true));
         }
       }
     }
 
     scanProgress.value = 1.0;
-    groups.sort((a, b) => b.wasteBytes.compareTo(a.wasteBytes));
-    return groups;
+    result.sort((a, b) => b.wasteBytes.compareTo(a.wasteBytes));
+    return result;
   }
-
-  // Population-count via Brian Kernighan's algorithm (faster than shift loop)
-  static int _hamming(int a, int b) {
-    int xor = a ^ b, count = 0;
-    while (xor != 0) { xor &= xor - 1; count++; }
-    return count;
-  }
-
-  static String _p(int n) => n.toString().padLeft(2, '0');
 
   // ── Selection ─────────────────────────────────────────────────────────────
 
+  // Firma originale mantenuta (group è richiesto dalle view)
   void toggleSelect(String id, DuplicateGroup group) {
     selectedIds.contains(id) ? selectedIds.remove(id) : selectedIds.add(id);
-    // no need to call refresh() — RxSet notifies automatically
   }
 
   void selectAllDuplicates() {
@@ -190,6 +189,7 @@ class DuplicatesController extends GetxController {
   // ── Actions ───────────────────────────────────────────────────────────────
 
   void moveSelectedToTrash() {
+    // FIX: costruisci i set UNA volta invece di ricercare nelle liste ad ogni iterazione
     final trashSet = {for (final t in _home.trashItems) t.id};
     final keptSet  = {for (final k in _home.keptItems)  k.id};
     for (final id in selectedIds.toList()) {
@@ -199,6 +199,18 @@ class DuplicatesController extends GetxController {
     scan();
   }
 
+  // Firma originale mantenuta
   Future<Uint8List?> loadFull(PhotoItem item) =>
       _home.resolveFullThumb(item).then((p) => p.thumbnail);
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  // Population-count via Brian Kernighan's algorithm
+  static int _hamming(int a, int b) {
+    int xor = a ^ b, count = 0;
+    while (xor != 0) { xor &= xor - 1; count++; }
+    return count;
+  }
+
+  static String _p(int n) => n.toString().padLeft(2, '0');
 }

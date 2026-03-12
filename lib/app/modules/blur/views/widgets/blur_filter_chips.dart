@@ -3,27 +3,32 @@ import 'package:get/get.dart';
 import 'package:media_cleaner/app/modules/blur/controllers/blur_controller.dart';
 import 'package:media_cleaner/app/service/blur_service.dart';
 
-/// Horizontal scrolling filter chips for [BlurView]:
-/// All / Sfocate / Scure / Sovraesposte.
+/// Chip di filtro per [BlurView]: Tutti / Sfocate / Scure / Sovraesposte.
+///
+/// FIX: i conteggi per issue vengono letti da [BlurController.issueCount]
+/// (calcolati una volta a fine scan) invece di eseguire 3× .where() O(n)
+/// sulla lista completa ad ogni rebuild.
 class BlurFilterChips extends GetView<BlurController> {
   const BlurFilterChips({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-      final all       = controller.blurItems.length;
-      final blurCount = controller.blurItems.where((b) => b.issue == QualityIssue.blur).length;
-      final darkCount = controller.blurItems.where((b) => b.issue == QualityIssue.dark).length;
-      final overCount = controller.blurItems.where((b) => b.issue == QualityIssue.overexposed).length;
+      // Lettura O(1) dalla mappa precalcolata — zero scan sulla lista
+      final counts   = controller.issueCount;
+      final all      = controller.blurItems.length;
+      final blurCnt  = counts[QualityIssue.blur]        ?? 0;
+      final darkCnt  = counts[QualityIssue.dark]        ?? 0;
+      final overCnt  = counts[QualityIssue.overexposed] ?? 0;
 
       return SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
         child: Row(children: [
-          _Chip(issue: null,                   label: 'Tutti ($all)',               color: const Color(0xFF5AC8FA)),
-          if (blurCount > 0) _Chip(issue: QualityIssue.blur,        label: 'Sfocate ($blurCount)',    color: Colors.purple),
-          if (darkCount > 0) _Chip(issue: QualityIssue.dark,        label: 'Scure ($darkCount)',      color: Colors.amber),
-          if (overCount > 0) _Chip(issue: QualityIssue.overexposed, label: 'Sovraesposte ($overCount)', color: Colors.orange),
+          _Chip(issue: null,                   label: 'Tutti ($all)',                color: const Color(0xFF5AC8FA)),
+          if (blurCnt > 0) _Chip(issue: QualityIssue.blur,        label: 'Sfocate ($blurCnt)',     color: Colors.purple),
+          if (darkCnt > 0) _Chip(issue: QualityIssue.dark,        label: 'Scure ($darkCnt)',       color: Colors.amber),
+          if (overCnt > 0) _Chip(issue: QualityIssue.overexposed, label: 'Sovraesposte ($overCnt)', color: Colors.orange),
         ]),
       );
     });
@@ -33,7 +38,7 @@ class BlurFilterChips extends GetView<BlurController> {
 class _Chip extends GetView<BlurController> {
   final QualityIssue? issue;
   final String label;
-  final Color color;
+  final Color  color;
 
   const _Chip({required this.issue, required this.label, required this.color});
 

@@ -14,25 +14,27 @@ class MediaAction {
 // ── Base controller ───────────────────────────────────────────────────────────
 
 /// Logica condivisa tra foto e video: lista, swipe, undo, trash, kept.
-/// Estendi questa classe e implementa [loadMedia] e [allItems].
 abstract class MediaController extends GetxController {
   final _service = PhotoService();
 
   // ── Stato osservabile ────────────────────────────────────────────────────
 
-  final trashItems = <PhotoItem>[].obs;
-  final keptItems  = <PhotoItem>[].obs;
-  final isLoading  = true.obs;
-  final canUndo    = false.obs;
+  final trashItems  = <PhotoItem>[].obs;
+  final keptItems   = <PhotoItem>[].obs;
+  final isLoading   = true.obs;
+  final canUndo     = false.obs;
   final currentSort = SortMode.dateNewest.obs;
 
-  // Statistiche
   final keptCount  = 0.obs;
   final trashCount = 0.obs;
-  int get trashBytes => trashItems.fold(0, (s, e) => s + e.sizeBytes);
-  int get keptBytes  => keptItems.fold(0, (s, e) => s + e.sizeBytes);
 
-  // Spazio liberato (sovrascrivibile dalle sottoclassi se usano cache)
+  // FIX: calcoli aggregati memoizzati — invalida solo quando le liste cambiano
+  int get trashBytes => _trashBytesCache ??= trashItems.fold(0, (s, e) => s! + e.sizeBytes) ?? 0;
+  int get keptBytes  => _keptBytesCache  ??= keptItems.fold(0,  (s, e) => s! + e.sizeBytes) ?? 0;
+
+  int? _trashBytesCache;
+  int? _keptBytesCache;
+
   int get totalFreedBytes => 0;
 
   // ── Stato interno ────────────────────────────────────────────────────────
@@ -40,18 +42,25 @@ abstract class MediaController extends GetxController {
   final _processedIds = <String>{};
   final _history      = <MediaAction>[];
 
-  // ── Astratti — da implementare ───────────────────────────────────────────
+  // FIX: indice O(1) su allItems — aggiornato solo in loadMedia/preload
+  final _allIndex   = <String, int>{};
+  // FIX: indice O(1) su trashItems e keptItems
+  final _trashIndex = <String, int>{};
+  final _keptIndex  = <String, int>{};
 
-  /// Lista osservabile di tutti i media (foto o video).
+  // ── Astratti ─────────────────────────────────────────────────────────────
+
   RxList<PhotoItem> get allItems;
-
-  /// Carica i media dal dispositivo e popola [allItems].
   Future<void> loadMedia();
 
-  // ── Derivati ──────────────────────────────────────────────────────────────
+  // ── Derivati ─────────────────────────────────────────────────────────────
 
+  // FIX: pendingItems cached — lista O(n) costruita una sola volta per frame
+  List<PhotoItem>? _pendingCache;
   List<PhotoItem> get pendingItems =>
-      allItems.where((p) => !_processedIds.contains(p.id)).toList();
+      _pendingCache ??= [for (final p in allItems) if (!_processedIds.contains(p.id)) p];
+
+  void _invalidatePending() => _pendingCache = null;
 
   int get pendingCount => pendingItems.length;
   int get totalCount   => allItems.length;
@@ -62,14 +71,15 @@ abstract class MediaController extends GetxController {
 
   // ── Caricamento comune ────────────────────────────────────────────────────
 
-  /// Chiamato da loadMedia() nelle sottoclassi dopo aver popolato allItems.
   Future<void> initAfterLoad({
     Set<String> keptIds   = const {},
     Set<String> trashIds  = const {},
     Map<String, int> sizeMap = const {},
   }) async {
-    final allIds = Set<String>.from(allItems.map((e) => e.id));
+    // FIX: costruisci l'indice una volta sola
+    _rebuildAllIndex();
 
+    final allIds     = _allIndex.keys.toSet();
     final validKept  = keptIds.intersection(allIds);
     final validTrash = trashIds.intersection(allIds);
 
@@ -77,129 +87,131 @@ abstract class MediaController extends GetxController {
       ..clear()
       ..addAll(validKept)
       ..addAll(validTrash);
+    _invalidatePending();
 
     _history.clear();
     canUndo.value = false;
 
-    keptItems.assignAll(
-      allItems.where((p) => validKept.contains(p.id)).map((p) {
-        final cached = sizeMap[p.id];
-        return cached != null ? p.copyWith(sizeBytes: cached) : p;
-      }),
-    );
-    trashItems.assignAll(
-      allItems.where((p) => validTrash.contains(p.id)).map((p) {
-        final cached = sizeMap[p.id];
-        return cached != null ? p.copyWith(sizeBytes: cached) : p;
-      }),
-    );
+    keptItems.assignAll(allItems.where((p) => validKept.contains(p.id)).map((p) {
+      final cached = sizeMap[p.id];
+      return cached != null ? p.copyWith(sizeBytes: cached) : p;
+    }));
+    trashItems.assignAll(allItems.where((p) => validTrash.contains(p.id)).map((p) {
+      final cached = sizeMap[p.id];
+      return cached != null ? p.copyWith(sizeBytes: cached) : p;
+    }));
+
+    _rebuildTrashIndex();
+    _rebuildKeptIndex();
+    _trashBytesCache = null;
+    _keptBytesCache  = null;
 
     keptCount.value  = keptItems.length;
     trashCount.value = trashItems.length;
   }
 
-  // ── Ordinamento ───────────────────────────────────────────────────────────
+  // ── Keep / Trash ──────────────────────────────────────────────────────────
 
-  Future<void> setSortMode(SortMode mode) async {
-    if (currentSort.value == mode) return;
-    currentSort.value = mode;
-    final sorted = await _service.sort(allItems.toList(), mode);
-    allItems.assignAll(sorted);
-    final sortedKept = await _service.sort(keptItems.toList(), mode);
-    keptItems.assignAll(sortedKept);
-  }
-
-  // ── Keep ──────────────────────────────────────────────────────────────────
-
-  void keepItem(String id, {bool trackHistory = true}) {
-    final idx = allItems.indexWhere((p) => p.id == id);
-    if (idx == -1 || _processedIds.contains(id)) return;
-
+  void keepItem(String id) {
+    if (_processedIds.contains(id)) return;
     _processedIds.add(id);
-    keptCount.value++;
-    keptItems.add(allItems[idx]);
-    allItems.refresh();
+    _invalidatePending();
+
+    final idx = _allIndex[id];
+    if (idx == null) return;
+    final item = allItems[idx];
+
+    _keptIndex[id] = keptItems.length;
+    keptItems.add(item);
+    keptCount.value = keptItems.length;
+    _keptBytesCache = null;
+
+    _history.add(MediaAction(id: id, type: MediaActionType.keep));
+    canUndo.value = true;
+
     onKeptIdsChanged(Set.from(_processedIds.where(_isKept)));
-
-    if (trackHistory) {
-      _history.add(MediaAction(id: id, type: MediaActionType.keep));
-      canUndo.value = true;
-    }
   }
 
-  // ── Trash ────────────────────────────────────────────────────────────────
-
-  void moveToTrash(String id, {bool trackHistory = true}) {
-    final idx = allItems.indexWhere((p) => p.id == id);
-    if (idx == -1 || _processedIds.contains(id)) return;
-
+  void trashItem(String id) {
+    if (_processedIds.contains(id)) return;
     _processedIds.add(id);
-    trashCount.value++;
-    trashItems.add(allItems[idx]);
-    allItems.refresh();
-    onTrashIdsChanged(Set.from(_processedIds.where(_isTrash)));
+    _invalidatePending();
 
-    if (trackHistory) {
-      _history.add(MediaAction(id: id, type: MediaActionType.trash));
-      canUndo.value = true;
-    }
+    final idx = _allIndex[id];
+    if (idx == null) return;
+    final item = allItems[idx];
+
+    _trashIndex[id] = trashItems.length;
+    trashItems.add(item);
+    trashCount.value = trashItems.length;
+    _trashBytesCache = null;
+
+    _history.add(MediaAction(id: id, type: MediaActionType.trash));
+    canUndo.value = true;
+
+    onTrashIdsChanged(Set.from(_processedIds.where(_isTrash)));
   }
+
+  bool _isKept(String id)  => keptItems.any((p) => p.id == id);
+  bool _isTrash(String id) => trashItems.any((p) => p.id == id);
 
   // ── Undo ─────────────────────────────────────────────────────────────────
 
-  bool undoLastAction() {
-    if (_history.isEmpty) return false;
+  void undo() {
+    if (_history.isEmpty) return;
     final last = _history.removeLast();
-    canUndo.value = _history.isNotEmpty;
+    _processedIds.remove(last.id);
+    _invalidatePending();
 
     if (last.type == MediaActionType.keep) {
-      final idx = keptItems.indexWhere((p) => p.id == last.id);
-      if (idx != -1) keptItems.removeAt(idx);
-      _processedIds.remove(last.id);
-      if (keptCount.value > 0) keptCount.value--;
-      allItems.refresh();
-      onKeptIdsChanged(Set.from(_processedIds.where(_isKept)));
+      // FIX: rimozione O(1) via indice invece di indexWhere
+      final ki = _keptIndex.remove(last.id);
+      if (ki != null && ki < keptItems.length && keptItems[ki].id == last.id) {
+        keptItems.removeAt(ki);
+        // Aggiorna indici degli elementi rimasti dopo ki
+        for (var i = ki; i < keptItems.length; i++) {
+          _keptIndex[keptItems[i].id] = i;
+        }
+      } else {
+        // Fallback se l'indice è obsoleto
+        final fallback = keptItems.indexWhere((p) => p.id == last.id);
+        if (fallback != -1) keptItems.removeAt(fallback);
+        _rebuildKeptIndex();
+      }
+      keptCount.value = keptItems.length;
+      _keptBytesCache = null;
     } else {
-      final idx = trashItems.indexWhere((p) => p.id == last.id);
-      if (idx != -1) trashItems.removeAt(idx);
-      _processedIds.remove(last.id);
-      if (trashCount.value > 0) trashCount.value--;
-      allItems.refresh();
-      onTrashIdsChanged(Set.from(_processedIds.where(_isTrash)));
+      final ti = _trashIndex.remove(last.id);
+      if (ti != null && ti < trashItems.length && trashItems[ti].id == last.id) {
+        trashItems.removeAt(ti);
+        for (var i = ti; i < trashItems.length; i++) {
+          _trashIndex[trashItems[i].id] = i;
+        }
+      } else {
+        final fallback = trashItems.indexWhere((p) => p.id == last.id);
+        if (fallback != -1) trashItems.removeAt(fallback);
+        _rebuildTrashIndex();
+      }
+      trashCount.value = trashItems.length;
+      _trashBytesCache = null;
     }
-    return true;
-  }
 
-  // ── Unkeep ───────────────────────────────────────────────────────────────
-
-  void unkeepItem(String id) {
-    final idx = keptItems.indexWhere((p) => p.id == id);
-    if (idx == -1) return;
-    keptItems.removeAt(idx);
-    _processedIds.remove(id);
-    if (keptCount.value > 0) keptCount.value--;
-    allItems.refresh();
-    onKeptIdsChanged(Set.from(_processedIds.where(_isKept)));
+    canUndo.value = _history.isNotEmpty;
+    onKeptIdsChanged(Set.from(keptItems.map((p) => p.id)));
+    onTrashIdsChanged(Set.from(trashItems.map((p) => p.id)));
   }
 
   // ── Restore from trash ────────────────────────────────────────────────────
-
-  void restoreFromTrash(String id) {
-    final idx = trashItems.indexWhere((p) => p.id == id);
-    if (idx == -1) return;
-    trashItems.removeAt(idx);
-    _processedIds.remove(id);
-    if (trashCount.value > 0) trashCount.value--;
-    allItems.refresh();
-    onTrashIdsChanged(Set.from(_processedIds.where(_isTrash)));
-  }
 
   void restoreAllFromTrash() {
     for (final item in trashItems) {
       _processedIds.remove(item.id);
     }
+    _invalidatePending();
     trashCount.value = 0;
     trashItems.clear();
+    _trashIndex.clear();
+    _trashBytesCache = null;
     allItems.refresh();
     onTrashIdsChanged({});
   }
@@ -211,35 +223,51 @@ abstract class MediaController extends GetxController {
     if (toDelete.isEmpty) return 0;
 
     final deletedIds = await _service.deleteAssets(toDelete);
+    if (deletedIds.isEmpty) return 0;
+
+    // FIX: calcola freed con indice O(1)
     int freed = 0;
+    final deletedSet = Set<String>.from(deletedIds);
 
     for (final id in deletedIds) {
-      final idx = trashItems.indexWhere((p) => p.id == id);
-      if (idx != -1) {
-        freed += trashItems[idx].sizeBytes;
-        trashItems.removeAt(idx);
+      final ti = _trashIndex.remove(id);
+      if (ti != null && ti < trashItems.length && trashItems[ti].id == id) {
+        freed += trashItems[ti].sizeBytes;
       }
       _processedIds.remove(id);
-      allItems.removeWhere((p) => p.id == id);
     }
 
+    // Rimuovi in blocco (più efficiente di removeAt ripetuti)
+    trashItems.removeWhere((p) => deletedSet.contains(p.id));
+    allItems.removeWhere((p) => deletedSet.contains(p.id));
+    _rebuildTrashIndex();
+    _rebuildAllIndex();
+    _invalidatePending();
+
     trashCount.value = trashItems.length;
-    onTrashIdsChanged(Set.from(_processedIds.where(_isTrash)));
+    _trashBytesCache = null;
+
+    onTrashIdsChanged(Set.from(trashItems.map((p) => p.id)));
     onBytesFreed(freed);
     return freed;
   }
 
-  Future<int> emptyTrash() async =>
+  Future<int> emptyTrash() =>
       deleteFromTrash(trashItems.map((e) => e.id).toList());
 
   // ── Reset ─────────────────────────────────────────────────────────────────
 
   Future<void> resetSession() async {
     _processedIds.clear();
+    _invalidatePending();
     trashItems.clear();
     keptItems.clear();
+    _trashIndex.clear();
+    _keptIndex.clear();
     keptCount.value  = 0;
     trashCount.value = 0;
+    _trashBytesCache = null;
+    _keptBytesCache  = null;
     _history.clear();
     canUndo.value = false;
     allItems.refresh();
@@ -258,33 +286,54 @@ abstract class MediaController extends GetxController {
   Future<void> preloadAll(Map<String, int> sizeMap) async {
     await for (final resolved in _service.resolveStream(allItems.toList())) {
       for (final r in resolved) {
-        final idx = allItems.indexWhere((p) => p.id == r.id);
-        if (idx != -1) allItems[idx] = r;
-        final tIdx = trashItems.indexWhere((p) => p.id == r.id);
-        if (tIdx != -1) trashItems[tIdx] = r;
-        final kIdx = keptItems.indexWhere((p) => p.id == r.id);
-        if (kIdx != -1) keptItems[kIdx] = r;
+        // FIX: aggiornamento O(1) via indice — niente indexWhere O(n)
+        final ai = _allIndex[r.id];
+        if (ai != null) allItems[ai] = r;
+
+        final ti = _trashIndex[r.id];
+        if (ti != null) trashItems[ti] = r;
+
+        final ki = _keptIndex[r.id];
+        if (ki != null) keptItems[ki] = r;
+
         if (r.sizeBytes > 0) sizeMap[r.id] = r.sizeBytes;
       }
+      // Un solo refresh per batch invece di uno per elemento
+      allItems.refresh();
+      if (_trashIndex.isNotEmpty) trashItems.refresh();
+      if (_keptIndex.isNotEmpty)  keptItems.refresh();
+      _trashBytesCache = null;
+      _keptBytesCache  = null;
     }
   }
 
-  // ── Hooks — override nelle sottoclassi per persistenza / stats ────────────
+  // ── Index helpers ─────────────────────────────────────────────────────────
 
-  /// Chiamato quando gli IDs mantenuti cambiano.
+  void _rebuildAllIndex() {
+    _allIndex.clear();
+    for (var i = 0; i < allItems.length; i++) {
+      _allIndex[allItems[i].id] = i;
+    }
+  }
+
+  void _rebuildTrashIndex() {
+    _trashIndex.clear();
+    for (var i = 0; i < trashItems.length; i++) {
+      _trashIndex[trashItems[i].id] = i;
+    }
+  }
+
+  void _rebuildKeptIndex() {
+    _keptIndex.clear();
+    for (var i = 0; i < keptItems.length; i++) {
+      _keptIndex[keptItems[i].id] = i;
+    }
+  }
+
+  // ── Hooks — override nelle sottoclassi ───────────────────────────────────
+
   void onKeptIdsChanged(Set<String> ids) {}
-
-  /// Chiamato quando gli IDs del cestino cambiano.
   void onTrashIdsChanged(Set<String> ids) {}
-
-  /// Chiamato dopo una cancellazione definitiva con i byte liberati.
   void onBytesFreed(int bytes) {}
-
-  /// Chiamato da resetSession().
   void onSessionReset() {}
-
-  // ── Helpers privati ───────────────────────────────────────────────────────
-
-  bool _isKept(String id)  => keptItems.any((p) => p.id == id);
-  bool _isTrash(String id) => trashItems.any((p) => p.id == id);
 }

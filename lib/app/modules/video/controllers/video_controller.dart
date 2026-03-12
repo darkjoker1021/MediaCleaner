@@ -8,7 +8,7 @@ class _R { const _R(this.id, this.t); final String id; final _A t; }
 
 class VideoController extends GetxController implements IMediaController {
   final _service = PhotoService();
-  final _cache   = CacheService();
+  CacheService get _cache => Get.find<CacheService>();
 
   // ── IMediaController ──────────────────────────────────────────────────────
   @override final allItems    = <PhotoItem>[].obs;
@@ -54,7 +54,7 @@ class VideoController extends GetxController implements IMediaController {
     isLoading.value = true;
     if (!await _service.requestPermission()) { isLoading.value = false; return; }
 
-    final sorted = await _service.sort(
+    final sorted = _service.sort(
         await _service.loadAllVideos(), currentSort.value);
     allItems.assignAll(sorted);
 
@@ -92,7 +92,7 @@ class VideoController extends GetxController implements IMediaController {
     keptCount.value = 0; trashCount.value = 0;
     _hist.clear(); canUndo.value = false;
     await _cache.clearAll();
-    allItems.assignAll(await _service.sort(allItems.toList(), currentSort.value));
+    allItems.assignAll(_service.sort(allItems.toList(), currentSort.value));
   }
 
   Future<void> resetAllStats() async {
@@ -103,7 +103,7 @@ class VideoController extends GetxController implements IMediaController {
   Future<void> setSortMode(SortMode m) async {
     if (currentSort.value == m) return;
     currentSort.value = m;
-    allItems.assignAll(await _service.sort(allItems.toList(), m));
+    allItems.assignAll(_service.sort(allItems.toList(), m));
   }
 
   // ── IMediaController: swipe ───────────────────────────────────────────────
