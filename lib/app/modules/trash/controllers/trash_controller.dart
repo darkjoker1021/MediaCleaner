@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 import 'package:get/get.dart';
-import 'package:media_cleaner/app/modules/shared/photo_item.dart';
-import 'package:media_cleaner/app/data/service/photo_service.dart';
+import 'package:media_cleaner/app/service/photo_service.dart';
 import 'package:media_cleaner/app/modules/shared/i_media_controller.dart';
 
 /// Funziona con FOTO e VIDEO — il binding inietta il controller giusto.

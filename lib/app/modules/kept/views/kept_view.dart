@@ -2,12 +2,14 @@
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:media_cleaner/app/modules/shared/media_app_bar.dart';
 import 'package:media_cleaner/app/modules/shared/photo_detail.dart';
-import 'package:media_cleaner/app/modules/shared/photo_item.dart';
-import 'package:media_cleaner/app/data/service/photo_service.dart';
+import 'package:media_cleaner/app/service/photo_service.dart';
 import 'package:media_cleaner/app/modules/kept/controllers/kept_controller.dart';
 import 'package:media_cleaner/app/modules/video/views/video_player_view.dart';
+import 'package:media_cleaner/core/theme/theme_helper.dart';
 import 'package:media_cleaner/core/widgets/safe_memory_image.dart';
+import 'package:media_cleaner/core/widgets/shimmer_box.dart';
 
 class KeptView extends GetView<KeptController> {
   /// [isVideo] = true  → apre VideoPlayerView al tap, mostra badge play
@@ -18,9 +20,8 @@ class KeptView extends GetView<KeptController> {
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: ThemeHelper.overlayStyle(context),
       child: Scaffold(
-        backgroundColor: const Color(0xFF0D0F14),
         body: SafeArea(
           child: Obx(() {
             final items = controller.keptItems;
@@ -39,74 +40,21 @@ class KeptView extends GetView<KeptController> {
 
   // ── AppBar ────────────────────────────────────────────────────────────────
 
-  Widget _appBar(List<PhotoItem> items) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-    child: Row(children: [
-      GestureDetector(
-        onTap: Get.back,
-        child: Container(
-          width: 40, height: 40,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Icon(FluentIcons.arrow_left_20_filled,
-              color: Colors.white70, size: 17),
-        ),
-      ),
-      const SizedBox(width: 14),
-      Expanded(child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            Text(
-              isVideo ? 'Video mantenuti' : 'Mantenuti',
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 20,
-                  fontWeight: FontWeight.w800, letterSpacing: -0.5),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: const Color(0xFF34C759).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text('${items.length}', style: const TextStyle(
-                  color: Color(0xFF34C759), fontSize: 12,
-                  fontWeight: FontWeight.w700)),
-            ),
-          ]),
-          Text('${PhotoService.formatBytes(controller.keptBytes)} totali',
-              style: const TextStyle(color: Colors.white38, fontSize: 12)),
-        ],
-      )),
-      if (items.isNotEmpty) ...[
-        const SizedBox(width: 8),
-        GestureDetector(
-          onTap: controller.toggleSelectionMode,
-          child: Obx(() => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: controller.isSelecting.value
-                  ? const Color(0xFF34C759).withValues(alpha: 0.12)
-                  : Colors.white.withValues(alpha: 0.07),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: controller.isSelecting.value
-                  ? const Color(0xFF34C759).withValues(alpha: 0.3)
-                  : Colors.transparent),
-            ),
-            child: Text(
-              controller.isSelecting.value ? 'Annulla' : 'Seleziona',
-              style: TextStyle(
-                  color: controller.isSelecting.value
-                      ? const Color(0xFF34C759) : Colors.white70,
-                  fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-          )),
-        ),
-      ],
-    ]),
+  Widget _appBar(List<PhotoItem> items) => MediaAppBar(
+    title: isVideo ? 'Video mantenuti' : 'Mantenuti',
+    badge: '${items.length}',
+    badgeColor: const Color(0xFF34C759),
+    subtitle: Text(
+      '${PhotoService.formatBytes(controller.keptBytes)} totali',
+      style: TextStyle(color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.38), fontSize: 12),
+    ),
+    selectButton: items.isNotEmpty
+        ? SelectToggleButton(
+            isSelecting: controller.isSelecting,
+            onTap: controller.toggleSelectionMode,
+            accentColor: const Color(0xFF34C759),
+          )
+        : null,
   );
 
   // ── Select all ────────────────────────────────────────────────────────────
@@ -127,7 +75,7 @@ class KeptView extends GetView<KeptController> {
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
                   color: controller.allSelected
-                      ? const Color(0xFF34C759) : Colors.white30,
+                      ? const Color(0xFF34C759) : Get.theme.colorScheme.onSurface.withValues(alpha: 0.3),
                   width: 1.5),
             ),
             child: controller.allSelected
@@ -137,7 +85,7 @@ class KeptView extends GetView<KeptController> {
           ),
           const SizedBox(width: 10),
           Text('Seleziona tutto (${items.length})',
-              style: const TextStyle(color: Colors.white60, fontSize: 13)),
+              style: TextStyle(color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13)),
         ])),
       ),
       const Spacer(),
@@ -157,18 +105,18 @@ class KeptView extends GetView<KeptController> {
         Container(
           width: 72, height: 72,
           decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
+              color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.05),
               shape: BoxShape.circle),
           child: Icon(
             isVideo ? FluentIcons.video_20_filled : FluentIcons.heart_20_filled,
-            color: Colors.white24, size: 32,
+            color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.24), size: 32,
           ),
         ),
         const SizedBox(height: 16),
         Text(
           isVideo ? 'Nessun video mantenuto' : 'Nessuna foto mantenuta',
-          style: const TextStyle(
-              color: Colors.white54, fontSize: 17,
+          style: TextStyle(
+              color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.54), fontSize: 17,
               fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 6),
@@ -177,7 +125,7 @@ class KeptView extends GetView<KeptController> {
               ? 'Fai swipe destra per mantenere i video'
               : 'Fai swipe destra per mantenere le foto',
           style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.25), fontSize: 13),
+              color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.25), fontSize: 13),
         ),
       ]),
     ),
@@ -192,7 +140,7 @@ class KeptView extends GetView<KeptController> {
         crossAxisCount: 3, crossAxisSpacing: 4, mainAxisSpacing: 4,
       ),
       itemCount: items.length,
-      itemBuilder: (ctx, i) => _gridItem(items[i]),
+      itemBuilder: (ctx, i) => RepaintBoundary(child: _gridItem(items[i])),
     ),
   );
 
@@ -245,8 +193,9 @@ class KeptView extends GetView<KeptController> {
           child: Stack(fit: StackFit.expand, children: [
             // thumbnail
             item.thumbnail != null
-                ? SafeMemoryImage(bytes: item.thumbnail!, fit: BoxFit.cover)
-                : Container(color: const Color(0xFF1A1C23)),
+                ? SafeMemoryImage(bytes: item.thumbnail!, fit: BoxFit.cover,
+                    cacheWidth: 200)
+                : const ShimmerBox(),
 
             // badge play (solo video) o badge cuore (foto)
             Positioned(top: 6, left: 6,
@@ -311,9 +260,9 @@ class KeptView extends GetView<KeptController> {
   Widget _bottomBar(List<PhotoItem> items) => Obx(() => Container(
     padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
     decoration: BoxDecoration(
-      color: const Color(0xFF0D0F14),
+      color: Get.theme.scaffoldBackgroundColor,
       border: Border(top: BorderSide(
-          color: Colors.white.withValues(alpha: 0.07))),
+          color: Get.theme.dividerColor)),
     ),
     child: controller.isSelecting.value && controller.selectedIds.isNotEmpty
         ? _selectionActions()
@@ -323,13 +272,13 @@ class KeptView extends GetView<KeptController> {
   Widget _defaultActions(List<PhotoItem> items) => Row(children: [
     Expanded(child: _btn(
       label: 'Cestino tutto', icon: FluentIcons.delete_20_filled,
-      color: Colors.white70, bg: Colors.white.withValues(alpha: 0.07),
+      color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.7), bg: Get.theme.cardColor,
       onTap: () => _confirmTrashAll(items),
     )),
     const SizedBox(width: 12),
     Expanded(child: _btn(
       label: 'Rimanda in coda', icon: FluentIcons.replay_20_filled,
-      color: Colors.white, bg: Colors.white.withValues(alpha: 0.12),
+      color: Get.theme.colorScheme.onSurface, bg: Get.theme.cardColor,
       onTap: _confirmUnkeepAll,
     )),
   ]);
@@ -337,7 +286,7 @@ class KeptView extends GetView<KeptController> {
   Widget _selectionActions() => Row(children: [
     Expanded(child: _btn(
       label: 'Rimanda in coda', icon: FluentIcons.replay_20_filled,
-      color: Colors.white70, bg: Colors.white.withValues(alpha: 0.07),
+      color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.7), bg: Get.theme.cardColor,
       onTap: controller.unkepSelected,
     )),
     const SizedBox(width: 12),
@@ -372,16 +321,16 @@ class KeptView extends GetView<KeptController> {
   // ── Dialogs ───────────────────────────────────────────────────────────────
 
   void _confirmTrashAll(List<PhotoItem> items) => Get.dialog(AlertDialog(
-    backgroundColor: const Color(0xFF1C1E27),
+    backgroundColor: Get.theme.cardColor,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-    title: const Text('Manda tutto nel cestino', style: TextStyle(
-        color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+    title: Text('Manda tutto nel cestino', style: TextStyle(
+        color: Get.theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w700)),
     content: Text('Sposterai ${items.length} elementi nel cestino.',
-        style: const TextStyle(color: Colors.white54, fontSize: 14, height: 1.5)),
+        style: TextStyle(color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.54), fontSize: 14, height: 1.5)),
     actions: [
       TextButton(onPressed: Get.back,
-          child: const Text('Annulla', style: TextStyle(
-              color: Colors.white54, fontWeight: FontWeight.w600))),
+          child: Text('Annulla', style: TextStyle(
+              color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.54), fontWeight: FontWeight.w600))),
       TextButton(
         onPressed: () {
           Get.back();
@@ -395,16 +344,16 @@ class KeptView extends GetView<KeptController> {
   ));
 
   void _confirmUnkeepAll() => Get.dialog(AlertDialog(
-    backgroundColor: const Color(0xFF1C1E27),
+    backgroundColor: Get.theme.cardColor,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-    title: const Text('Rimanda tutto in coda', style: TextStyle(
-        color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
-    content: const Text('Tutti gli elementi torneranno in coda.',
-        style: TextStyle(color: Colors.white54, fontSize: 14, height: 1.5)),
+    title: Text('Rimanda tutto in coda', style: TextStyle(
+        color: Get.theme.colorScheme.onSurface, fontSize: 16, fontWeight: FontWeight.w700)),
+    content: Text('Tutti gli elementi torneranno in coda.',
+        style: TextStyle(color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.54), fontSize: 14, height: 1.5)),
     actions: [
       TextButton(onPressed: Get.back,
-          child: const Text('Annulla', style: TextStyle(
-              color: Colors.white54, fontWeight: FontWeight.w600))),
+          child: Text('Annulla', style: TextStyle(
+              color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.54), fontWeight: FontWeight.w600))),
       TextButton(
         onPressed: () { Get.back(); controller.unkepAll(); },
         child: const Text('Rimanda', style: TextStyle(

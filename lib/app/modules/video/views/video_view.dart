@@ -3,8 +3,12 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 import 'package:get/get.dart';
+import 'package:lottie/lottie.dart';
 import 'package:media_cleaner/app/modules/shared/stats_bar.dart';
+import 'package:media_cleaner/app/modules/shared/swipe_bottom_nav.dart';
 import 'package:media_cleaner/app/routes/app_pages.dart';
+import 'package:media_cleaner/app/service/photo_service.dart';
+import 'package:media_cleaner/core/theme/theme_helper.dart';
 import 'package:media_cleaner/core/widgets/swipe_card.dart';
 
 import '../controllers/video_controller.dart';
@@ -16,23 +20,16 @@ class VideoView extends GetView<VideoController> {
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: ThemeHelper.overlayStyle(context),
       child: Scaffold(
-        backgroundColor: const Color(0xFF0D0F14),
         body: SafeArea(
+          // L'Obx gestisce solo isLoading.
+          // _VideoSwiperBody è un widget separato: il suo build() accede a
+          // pendingVideos FUORI dall'Obx, così allItems.refresh() non distrugge
+          // il CardSwiper ad ogni swipe.
           child: Obx(() {
             if (controller.isLoading.value) return _loader();
-            return Column(children: [
-              StatsBar(
-                ctrl: controller,
-                pendingLabel: 'rimasti',
-                totalIcon: FluentIcons.video_20_filled,
-              ),
-              const SizedBox(height: 4),
-              Expanded(child: _body()),
-              _actionHints(),
-              _bottomNav(),
-            ]);
+            return const _VideoSwiperBody();
           }),
         ),
       ),
@@ -43,48 +40,84 @@ class VideoView extends GetView<VideoController> {
 
   Widget _loader() => Center(
     child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const SizedBox(
-        width: 40, height: 40,
-        child: CircularProgressIndicator(
-            color: Color(0xFF0A84FF), strokeWidth: 2),
-      ),
+      Lottie.asset('assets/lottie/search.json', width: 100, height: 100),
       const SizedBox(height: 20),
       Text('Caricamento video...',
           style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.35), fontSize: 14)),
+              color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.35), fontSize: 14)),
     ]),
   );
 
   // ── Body / swiper ─────────────────────────────────────────────────────────
+  // NOTA: _body() non è dentro l'Obx principale per evitare che
+  // allItems.refresh() (ad ogni swipe) distrugga e ricrei il CardSwiper.
 
-  Widget _body() {
-    final pending = controller.pendingVideos;
-    if (pending.isEmpty) return _doneScreen();
+}
+
+// ── Widget separato per il corpo del video swiper ────────────────────────────
+// Stare fuori dall'Obx di VideoView evita che allItems.refresh() (ad ogni
+// swipe) ricostruisca il CardSwiper.
+class _VideoSwiperBody extends StatelessWidget {
+  const _VideoSwiperBody();
+
+  VideoController get _ctrl => Get.find<VideoController>();
+
+  @override
+  Widget build(BuildContext context) => Obx(() {
+    final ctrl    = _ctrl;
+    final pending = ctrl.pendingVideos;
+    return Column(children: [
+      StatsBar(ctrl: ctrl, pendingLabel: 'rimasti'),
+      const SizedBox(height: 4),
+      Expanded(child: pending.isEmpty ? _doneScreen(ctrl) : _swiper(ctrl, pending)),
+      SwipeActionHints(ctrl: ctrl),
+      SwipeBottomNav(
+        ctrl: ctrl,
+        keptLabel: 'Mantenuti',
+        onKept: () => Get.toNamed(Routes.VIDEO_KEPT),
+        onTrash: () => Get.toNamed(Routes.VIDEO_TRASH),
+        onAfterUndo: () => Get.snackbar(
+          'Azione annullata', '',
+          snackPosition: SnackPosition.BOTTOM,
+          duration: const Duration(milliseconds: 900),
+          backgroundColor: const Color(0xFF0A84FF).withValues(alpha: 0.88),
+          colorText: Colors.white,
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          borderRadius: 14,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          messageText: const SizedBox.shrink(),
+        ),
+      ),
+    ]);
+  });
+
+  Widget _swiper(VideoController ctrl, List<PhotoItem> pending) {
     return CardSwiper(
-      key: ValueKey(pending.length),
+      key: ValueKey('${pending.length}_video'),
       cardsCount: pending.length,
       numberOfCardsDisplayed: pending.length >= 3 ? 3 : pending.length,
       backCardOffset: const Offset(0, 26),
       scale: 0.93,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      allowedSwipeDirection: const AllowedSwipeDirection.only(left: true, right: true),
       onSwipe: (prevIdx, _, direction) async {
-        final cur = controller.pendingVideos;
+        final cur = ctrl.pendingVideos;
         if (prevIdx >= cur.length) return true;
         final item = cur[prevIdx];
         if (direction == CardSwiperDirection.left) {
           HapticFeedback.mediumImpact();
-          controller.moveToTrash(item.id);
+          ctrl.moveToTrash(item.id);
         } else if (direction == CardSwiperDirection.right) {
           HapticFeedback.lightImpact();
-          controller.keepVideo(item.id);
+          ctrl.keepVideo(item.id);
         }
         return true;
       },
       cardBuilder: (context, index, hThreshold, _) {
-        final cur = controller.pendingVideos;
-        if (index >= cur.length) return const SizedBox.shrink();
-        final item = cur[index];
-        
+        if (index >= pending.length) return const SizedBox.shrink();
+        // Prende l'item più aggiornato (con thumbnail se già caricata)
+        final stale = pending[index];
+        final item  = ctrl.allItems.firstWhereOrNull((p) => p.id == stale.id) ?? stale;
         return SwipeCard(
           item: item,
           hThreshold: hThreshold.toDouble(),
@@ -94,9 +127,7 @@ class VideoView extends GetView<VideoController> {
     );
   }
 
-  // ── Done screen ───────────────────────────────────────────────────────────
-
-  Widget _doneScreen() => Center(
+  Widget _doneScreen(VideoController ctrl) => Center(
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -109,49 +140,47 @@ class VideoView extends GetView<VideoController> {
               color: Color(0xFF34C759), size: 40),
         ),
         const SizedBox(height: 24),
-        const Text('Tutti i video revisionati!',
-            style: TextStyle(color: Colors.white, fontSize: 22,
+        Text('Tutti i video revisionati!',
+            style: TextStyle(color: Get.theme.colorScheme.onSurface, fontSize: 22,
                 fontWeight: FontWeight.w800, letterSpacing: -0.5)),
         const SizedBox(height: 8),
         Obx(() => Text(
-          '${controller.keptCount.value} mantenuti · '
-          '${controller.trashCount.value} nel cestino',
+          '${ctrl.keptCount.value} mantenuti · '
+          '${ctrl.trashCount.value} nel cestino',
           textAlign: TextAlign.center,
           style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.4),
+              color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.4),
               fontSize: 14, height: 1.6),
         )),
         const SizedBox(height: 20),
         Obx(() => Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (controller.keptCount.value > 0)
+            if (ctrl.keptCount.value > 0)
               _quickBtn(
                 icon: FluentIcons.heart_20_filled,
                 color: const Color(0xFF34C759),
                 label: 'Mantenuti',
-                badge: '${controller.keptCount.value}',
+                badge: '${ctrl.keptCount.value}',
                 onTap: () => Get.toNamed(Routes.VIDEO_KEPT),
               ),
-            if (controller.keptCount.value > 0 &&
-                controller.trashCount.value > 0)
+            if (ctrl.keptCount.value > 0 && ctrl.trashCount.value > 0)
               const SizedBox(width: 12),
-            if (controller.trashCount.value > 0)
+            if (ctrl.trashCount.value > 0)
               _quickBtn(
                 icon: FluentIcons.delete_20_filled,
                 color: const Color(0xFFFF3B30),
                 label: 'Cestino',
-                badge: '${controller.trashCount.value}',
+                badge: '${ctrl.trashCount.value}',
                 onTap: () => Get.toNamed(Routes.VIDEO_TRASH),
               ),
           ],
         )),
         const SizedBox(height: 24),
         GestureDetector(
-          onTap: controller.loadVideos,
+          onTap: ctrl.loadVideos,
           child: Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 28, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
             decoration: BoxDecoration(
                 color: const Color(0xFF0A84FF),
                 borderRadius: BorderRadius.circular(16)),
@@ -184,8 +213,7 @@ class VideoView extends GetView<VideoController> {
                     fontWeight: FontWeight.w600)),
             const SizedBox(width: 6),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(6)),
@@ -195,112 +223,5 @@ class VideoView extends GetView<VideoController> {
             ),
           ]),
         ),
-      );
-
-  // ── Hints ─────────────────────────────────────────────────────────────────
-
-  Widget _actionHints() => Obx(() {
-    if (controller.pendingVideos.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 4, 24, 0),
-      child: Row(children: [
-        _hint('← Cestino', const Color(0xFFFF3B30)),
-        const Spacer(),
-        Text('${controller.pendingCount}',
-            style: const TextStyle(color: Colors.white30,
-                fontSize: 22, fontWeight: FontWeight.w300)),
-        const Spacer(),
-        _hint('Mantieni →', const Color(0xFF34C759)),
-      ]),
-    );
-  });
-
-  Widget _hint(String text, Color color) => Text(text,
-      style: TextStyle(color: color.withValues(alpha: 0.5),
-          fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.3));
-
-  // ── Bottom nav ────────────────────────────────────────────────────────────
-
-  Widget _bottomNav() => Container(
-    margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-    decoration: BoxDecoration(
-      color: const Color(0xFF16181F),
-      borderRadius: BorderRadius.circular(22),
-      border: Border.all(
-          color: Colors.white.withValues(alpha: 0.07)),
-    ),
-    child: Row(children: [
-      Expanded(child: Obx(() => _navItem(
-        icon: FluentIcons.heart_20_filled,
-        label: 'Mantenuti',
-        badge: controller.keptCount.value > 0
-            ? '${controller.keptCount.value}' : null,
-        color: const Color(0xFF34C759),
-        onTap: () => Get.toNamed(Routes.VIDEO_KEPT),
-      ))),
-      Obx(() {
-        final ok = controller.canUndo.value;
-        return GestureDetector(
-          onTap: ok ? () {
-            if (controller.undoLastAction()) HapticFeedback.selectionClick();
-          } : null,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: 52, height: 52,
-            decoration: BoxDecoration(
-              color: ok ? const Color(0xFF0A84FF)
-                        : const Color(0xFF2A2D36),
-              shape: BoxShape.circle,
-              boxShadow: ok ? [BoxShadow(
-                color: const Color(0xFF0A84FF).withValues(alpha: 0.35),
-                blurRadius: 12, offset: const Offset(0, 4),
-              )] : [],
-            ),
-            child: Icon(FluentIcons.arrow_undo_20_filled,
-                color: ok ? Colors.white : Colors.white38, size: 22),
-          ),
-        );
-      }),
-      Expanded(child: Obx(() => _navItem(
-        icon: FluentIcons.delete_20_filled,
-        label: 'Cestino',
-        badge: controller.trashCount.value > 0
-            ? '${controller.trashCount.value}' : null,
-        color: const Color(0xFFFF3B30),
-        onTap: () => Get.toNamed(Routes.VIDEO_TRASH),
-      ))),
-    ]),
-  );
-
-  Widget _navItem({required IconData icon, required String label,
-      String? badge, required Color color,
-      required VoidCallback onTap}) =>
-      GestureDetector(
-        onTap: onTap,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Stack(clipBehavior: Clip.none, children: [
-            Icon(icon,
-                color: badge != null ? color : Colors.white38, size: 22),
-            if (badge != null)
-              Positioned(top: -4, right: -8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(6)),
-                  child: Text(badge,
-                      style: const TextStyle(color: Colors.white,
-                          fontSize: 9, fontWeight: FontWeight.w800)),
-                ),
-              ),
-          ]),
-          const SizedBox(height: 3),
-          Text(label,
-              style: TextStyle(
-                  color: badge != null ? color : Colors.white38,
-                  fontSize: 10, fontWeight: FontWeight.w600)),
-        ]),
       );
 }

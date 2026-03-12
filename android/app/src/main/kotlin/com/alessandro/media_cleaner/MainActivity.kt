@@ -1,4 +1,4 @@
-package com.example.media_cleaner
+package com.alessandro.media_cleaner
 
 import io.flutter.embedding.android.FlutterActivity
 

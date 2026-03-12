@@ -1,10 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:media_cleaner/app/modules/shared/photo_item.dart';
-import 'package:media_cleaner/app/data/service/photo_service.dart';
+import 'package:media_cleaner/app/service/photo_service.dart';
 import 'package:media_cleaner/core/widgets/safe_memory_image.dart';
+import 'package:media_cleaner/core/widgets/shimmer_box.dart';
+import 'package:photo_manager/photo_manager.dart';
 
-class SwipeCard extends StatelessWidget {
+class SwipeCard extends StatefulWidget {
   final PhotoItem   item;
   final double      hThreshold;
   final VoidCallback? onTap;
@@ -17,24 +20,53 @@ class SwipeCard extends StatelessWidget {
   });
 
   @override
+  State<SwipeCard> createState() => _SwipeCardState();
+}
+
+class _SwipeCardState extends State<SwipeCard> {
+  Uint8List? _thumb;
+
+  @override
+  void initState() {
+    super.initState();
+    _thumb = widget.item.thumbnail;
+    if (_thumb == null) _loadThumb();
+  }
+
+  @override
+  void didUpdateWidget(SwipeCard old) {
+    super.didUpdateWidget(old);
+    if (old.item.id != widget.item.id) {
+      _thumb = widget.item.thumbnail;
+      if (_thumb == null) _loadThumb();
+    } else if (_thumb == null && widget.item.thumbnail != null) {
+      // Thumbnail caricata esternamente (preload): usa subito senza ricaricare
+      setState(() => _thumb = widget.item.thumbnail);
+    }
+  }
+
+  Future<void> _loadThumb() async {
+    final bytes = await widget.item.asset
+        .thumbnailDataWithSize(const ThumbnailSize.square(800));
+    if (mounted) setState(() => _thumb = bytes);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final leftOpacity  = (hThreshold < 0 ? -hThreshold : 0.0).clamp(0.0, 100.0) / 100.0;
-    final rightOpacity = (hThreshold > 0 ?  hThreshold : 0.0).clamp(0.0, 100.0) / 100.0;
-    final sizeColor    = PhotoService.sizeColor(item.sizeBytes);
+    final leftOpacity  = (widget.hThreshold < 0 ? -widget.hThreshold : 0.0).clamp(0.0, 100.0) / 100.0;
+    final rightOpacity = (widget.hThreshold > 0 ?  widget.hThreshold : 0.0).clamp(0.0, 100.0) / 100.0;
+    final sizeColor    = PhotoService.sizeColor(widget.item.sizeBytes);
 
     return GestureDetector(
-      onTap: onTap,
+      onTap: widget.onTap,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(28),
         child: Stack(fit: StackFit.expand, children: [
 
           // Foto
-          Container(
-            color: const Color(0xFF111318),
-            child: item.thumbnail != null
-              ? SafeMemoryImage(bytes: item.thumbnail!, fit: BoxFit.cover)
-                : _placeholder(),
-          ),
+          _thumb != null
+              ? SafeMemoryImage(bytes: _thumb!, fit: BoxFit.cover)
+              : const ShimmerBox(),
 
           // Gradient top
           Positioned(top: 0, left: 0, right: 0,
@@ -58,8 +90,8 @@ class SwipeCard extends StatelessWidget {
 
           // ── Badge dimensione (top left, colorato per peso) ────────────────
           Positioned(top: 16, left: 16,
-            child: item.sizeBytes > 0
-                ? _badge(PhotoService.formatBytes(item.sizeBytes),
+            child: widget.item.sizeBytes > 0
+                ? _badge(PhotoService.formatBytes(widget.item.sizeBytes),
                     sizeColor, FluentIcons.data_usage_20_filled)
                 : const SizedBox.shrink(),
           ),
@@ -67,7 +99,7 @@ class SwipeCard extends StatelessWidget {
           // ── Data + ora (top right) ────────────────────────────────────────
           Positioned(top: 16, right: 16,
             child: _badge(
-              _fmtDateTime(item.createdAt),
+              _fmtDateTime(widget.item.createdAt),
               Colors.white.withValues(alpha: 0.75),
               FluentIcons.calendar_today_20_filled,
             ),
@@ -108,15 +140,6 @@ class SwipeCard extends StatelessWidget {
       Text(text, style: TextStyle(
           color: color, fontSize: 11, fontWeight: FontWeight.w700,
           letterSpacing: 0.2)),
-    ]),
-  );
-
-  Widget _placeholder() => Center(
-    child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const CircularProgressIndicator(color: Colors.white24, strokeWidth: 1.5),
-      const SizedBox(height: 10),
-      Text('Caricamento...',
-          style: TextStyle(color: Colors.white.withValues(alpha: 0.2), fontSize: 11)),
     ]),
   );
 

@@ -1,32 +1,12 @@
 name: media_cleaner
-description: "A new Flutter project."
+description: "Pulisci la tua galleria: elimina duplicati, blur, screenshot e video inutili."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
-
-# The following defines the version and build number for your application.
-# A version number is three numbers separated by dots, like 1.2.43
-# followed by an optional build number separated by a +.
-# Both the version and the builder number may be overridden in flutter
-# build by specifying --build-name and --build-number, respectively.
-# In Android, build-name is used as versionName while build-number used as versionCode.
-# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
-# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
-# Read more about iOS versioning at
-# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
-# In Windows, build-name is used as the major, minor, and patch parts
-# of the product and file versions while build-number is used as the build suffix.
 version: 1.0.0+1
 
 environment:
   sdk: ^3.11.1
-
-# Dependencies specify other packages that your package needs in order to work.
-# To automatically upgrade your package dependencies to the latest versions
-# consider running `flutter pub upgrade --major-versions`. Alternatively,
-# dependencies can be manually updated by changing the version numbers below to
-# the latest version available on pub.dev. To see which dependencies have newer
-# versions available, run `flutter pub outdated`.
 
 dependencies:
   fluentui_system_icons: ^1.1.244
@@ -36,12 +16,13 @@ dependencies:
   video_player: ^2.9.2
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.8
   shared_preferences: ^2.5.3
-  local_auth: ^2.3.0
   get: ^4.7.3
   google_fonts: ^8.0.2
   flutter_launcher_icons: ^0.13.1
+  fl_chart: ^0.70.0
+  image: ^4.3.0
+  lottie: ^3.3.2
 
 dev_dependencies:
   flutter_test:
@@ -51,7 +32,10 @@ dev_dependencies:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/icon.png"
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#0D0F14"
+  adaptive_icon_foreground: "assets/icon/icon.png"
+  min_sdk_android: 21
 
 
 flutter:
@@ -59,3 +43,4 @@ flutter:
 
   assets:
     - assets/icon/
+    - assets/lottie/

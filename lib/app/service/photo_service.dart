@@ -1,17 +1,19 @@
 import 'dart:typed_data';
 import 'dart:ui';
-import 'package:media_cleaner/app/modules/shared/photo_item.dart';
+import 'package:media_cleaner/app/models/photo_item.dart';
+import 'package:media_cleaner/app/models/sort_mode.dart';
 import 'package:photo_manager/photo_manager.dart';
 
-enum SortMode { dateNewest, dateOldest, sizeHeaviest, sizeLightest }
+export 'package:media_cleaner/app/models/photo_item.dart';
+export 'package:media_cleaner/app/models/sort_mode.dart';
 
 class PhotoService {
   // Thumbnail piccolo per la card (caricamento veloce)
-  static const _thumbSize  = ThumbnailSize.square(800);
+  static const _thumbSize  = ThumbnailSize.square(600); // bilanciamento qualità/RAM
   // Thumbnail grande per il dettaglio
   static const _fullSize   = ThumbnailSize.square(2400);
   static const _batchLoad  = 500;
-  static const _batchThumb = 8;
+  static const _batchThumb = 16; // era 8: caricamento più veloce
 
   Future<bool> requestPermission() async {
     final ps = await PhotoManager.requestPermissionExtend();

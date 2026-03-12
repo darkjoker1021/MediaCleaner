@@ -1,6 +1,5 @@
 import 'package:get/get.dart';
-import 'package:media_cleaner/app/data/service/photo_service.dart';
-import 'package:media_cleaner/app/modules/shared/photo_item.dart';
+import 'package:media_cleaner/app/service/photo_service.dart';
 
 /// Contratto minimo che HomeController e VideoController devono rispettare.
 /// StatsBar, SortSheet, KeptController e TrashController dipendono

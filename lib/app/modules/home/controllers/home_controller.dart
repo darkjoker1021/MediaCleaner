@@ -1,16 +1,16 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:media_cleaner/app/data/service/cache_service.dart';
-import 'package:media_cleaner/app/data/service/photo_service.dart';
-import 'package:media_cleaner/app/modules/shared/photo_item.dart';
+import 'package:media_cleaner/app/service/cache_service.dart';
+import 'package:media_cleaner/app/service/photo_service.dart';
 import '../../shared/i_media_controller.dart';
 
 enum _Action { keep, trash }
 class _Rec { const _Rec(this.id, this.type); final String id; final _Action type; }
 
 class HomeController extends GetxController implements IMediaController {
-  final _service = PhotoService();
-  final _cache   = CacheService();
+  final _service    = PhotoService();
+  final _cache      = CacheService();
+  final scaffoldKey = GlobalKey<ScaffoldState>();
 
   // ── IMediaController ──────────────────────────────────────────────────────
   @override final allItems   = <PhotoItem>[].obs;
@@ -38,6 +38,10 @@ class HomeController extends GetxController implements IMediaController {
   var   _keptIds      = <String>{};
   var   _trashIds     = <String>{};
   final _history      = <_Rec>[];
+
+  VoidCallback? _swiperUndo;
+  void attachSwiperUndo(VoidCallback cb) => _swiperUndo = cb;
+  void detachSwiperUndo() => _swiperUndo = null;
 
   List<PhotoItem> get pendingItems =>
       allItems.where((p) => !_processedIds.contains(p.id)).toList();
@@ -136,6 +140,7 @@ class HomeController extends GetxController implements IMediaController {
       if (trashCount.value > 0) trashCount.value--;
       allItems.refresh(); _cache.saveTrashIds(_trashIds);
     }
+    _swiperUndo?.call();
     return true;
   }
 
@@ -200,12 +205,14 @@ class HomeController extends GetxController implements IMediaController {
 
   // ── Reset ─────────────────────────────────────────────────────────────────
   Future<void> resetSession() async {
+    isLoading.value = true;
     _processedIds.clear(); _keptIds.clear(); _trashIds.clear();
     trashItems.clear(); keptItems.clear();
     keptCount.value = 0; trashCount.value = 0;
     _history.clear(); canUndo.value = false;
     await _cache.clearAll();
     allItems.assignAll(await _service.sort(allItems.toList(), currentSort.value));
+    isLoading.value = false;
   }
 
   Future<void> resetAllStats() async {
@@ -230,16 +237,24 @@ class HomeController extends GetxController implements IMediaController {
   // ── Preload ───────────────────────────────────────────────────────────────
   Future<void> _preload() async {
     final sizeMap = Map<String, int>.from(_cache.getSizeMap());
+    // Mappe indice O(1) invece di indexWhere O(n) per ogni elemento
+    final allIdx   = <String, int>{for (var i = 0; i < allItems.length;   i++) allItems[i].id:   i};
+    final trashIdx = <String, int>{for (var i = 0; i < trashItems.length; i++) trashItems[i].id: i};
+    final keptIdx  = <String, int>{for (var i = 0; i < keptItems.length;  i++) keptItems[i].id:  i};
+
     await for (final resolved in _service.resolveStream(allItems.toList())) {
+      // Aggiornamento silenzioso + un solo refresh() per batch (no rebuild per-item)
       for (final r in resolved) {
-        final i = allItems.indexWhere((p) => p.id == r.id);
-        if (i != -1) allItems[i] = r;
-        final ti = trashItems.indexWhere((p) => p.id == r.id);
-        if (ti != -1) trashItems[ti] = r;
-        final ki = keptItems.indexWhere((p) => p.id == r.id);
-        if (ki != -1) keptItems[ki] = r;
+        final i  = allIdx[r.id];   if (i  != null) allItems[i]   = r;
+        final ti = trashIdx[r.id]; if (ti != null) trashItems[ti] = r;
+        final ki = keptIdx[r.id];  if (ki != null) keptItems[ki]  = r;
         if (r.sizeBytes > 0) sizeMap[r.id] = r.sizeBytes;
       }
+      allItems.refresh();
+      if (trashItems.isNotEmpty) trashItems.refresh();
+      if (keptItems.isNotEmpty)  keptItems.refresh();
+      // Cede il thread UI tra un batch e l'altro per evitare frame drop
+      await Future.delayed(Duration.zero);
     }
     await _cache.saveSizeMap(sizeMap);
   }

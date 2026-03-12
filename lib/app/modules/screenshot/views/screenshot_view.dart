@@ -2,9 +2,11 @@
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:lottie/lottie.dart';
+import 'package:media_cleaner/app/modules/shared/media_app_bar.dart';
 import 'package:media_cleaner/app/modules/shared/photo_detail.dart';
-import 'package:media_cleaner/app/modules/shared/photo_item.dart';
-import 'package:media_cleaner/app/data/service/photo_service.dart';
+import 'package:media_cleaner/app/service/photo_service.dart';
+import 'package:media_cleaner/core/theme/theme_helper.dart';
 import 'package:media_cleaner/core/widgets/safe_memory_image.dart';
 
 import '../controllers/screenshot_controller.dart';
@@ -15,17 +17,13 @@ class ScreenshotView extends GetView<ScreenshotController> {
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: ThemeHelper.overlayStyle(context),
       child: Scaffold(
-        backgroundColor: const Color(0xFF0D0F14),
         body: SafeArea(
           child: Obx(() {
             if (controller.isLoading.value) {
-              return const Center(
-                child: CircularProgressIndicator(
-                  color: Color(0xFF0A84FF),
-                  strokeWidth: 2,
-                ),
+              return Center(
+                child: Lottie.asset('assets/lottie/search.json')
               );
             }
 
@@ -45,79 +43,19 @@ class ScreenshotView extends GetView<ScreenshotController> {
     );
   }
 
-  Widget _appBar(List<PhotoItem> items) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-    child: Row(
-      children: [
-        GestureDetector(
-          onTap: Get.back,
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.07),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              FluentIcons.arrow_left_20_filled,
-              color: Colors.white70,
-              size: 17,
-            ),
-          ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Screenshot',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              Text(
-                '${items.length} elementi · ${PhotoService.formatBytes(items.fold(0, (s, e) => s + e.sizeBytes))}',
-                style: const TextStyle(color: Colors.white38, fontSize: 12),
-              ),
-            ],
-          ),
-        ),
-        if (items.isNotEmpty)
-          GestureDetector(
-            onTap: controller.toggleSelectionMode,
-            child: Obx(
-              () => Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: controller.isSelecting.value
-                      ? const Color(0xFF0A84FF).withValues(alpha: 0.15)
-                      : Colors.white.withValues(alpha: 0.07),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: controller.isSelecting.value
-                        ? const Color(0xFF0A84FF).withValues(alpha: 0.4)
-                        : Colors.transparent,
-                  ),
-                ),
-                child: Text(
-                  controller.isSelecting.value ? 'Annulla' : 'Seleziona',
-                  style: TextStyle(
-                    color: controller.isSelecting.value
-                        ? const Color(0xFF0A84FF)
-                        : Colors.white70,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
+  Widget _appBar(List<PhotoItem> items) => MediaAppBar(
+    title: 'Screenshot',
+    subtitle: Text(
+      '${items.length} elementi · ${PhotoService.formatBytes(items.fold(0, (s, e) => s + e.sizeBytes))}',
+      style: TextStyle(color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.38), fontSize: 12),
     ),
+    selectButton: items.isNotEmpty
+        ? SelectToggleButton(
+            isSelecting: controller.isSelecting,
+            onTap: controller.toggleSelectionMode,
+            accentColor: const Color(0xFF0A84FF),
+          )
+        : null,
   );
 
   Widget _selectAllRow(List<PhotoItem> items) => Padding(
@@ -143,7 +81,7 @@ class ScreenshotView extends GetView<ScreenshotController> {
                     border: Border.all(
                       color: controller.allSelected
                           ? const Color(0xFF0A84FF)
-                          : Colors.white30,
+                          : Get.theme.colorScheme.onSurface.withValues(alpha: 0.3),
                       width: 1.5,
                     ),
                   ),
@@ -158,7 +96,7 @@ class ScreenshotView extends GetView<ScreenshotController> {
                 const SizedBox(width: 10),
                 Text(
                   'Seleziona tutto (${items.length})',
-                  style: const TextStyle(color: Colors.white60, fontSize: 13),
+                  style: TextStyle(color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13),
                 ),
               ],
             ),
@@ -190,20 +128,20 @@ class ScreenshotView extends GetView<ScreenshotController> {
             width: 72,
             height: 72,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
+              color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.05),
               shape: BoxShape.circle,
             ),
             child: const Icon(
               FluentIcons.scan_camera_20_filled,
-              color: Colors.white24,
+              color: Color(0xFF5AC8FA),
               size: 32,
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             'Nessuno screenshot da revisionare',
             style: TextStyle(
-              color: Colors.white54,
+              color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.54),
               fontSize: 17,
               fontWeight: FontWeight.w600,
             ),
@@ -212,7 +150,7 @@ class ScreenshotView extends GetView<ScreenshotController> {
           Text(
             'Gli screenshot in cestino o mantenuti non compaiono qui',
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.25),
+              color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.25),
               fontSize: 13,
             ),
           ),
@@ -230,7 +168,7 @@ class ScreenshotView extends GetView<ScreenshotController> {
         mainAxisSpacing: 4,
       ),
       itemCount: items.length,
-      itemBuilder: (context, i) => _gridItem(items[i]),
+      itemBuilder: (context, i) => RepaintBoundary(child: _gridItem(items[i])),
     ),
   );
 
@@ -282,7 +220,8 @@ class ScreenshotView extends GetView<ScreenshotController> {
             fit: StackFit.expand,
             children: [
               item.thumbnail != null
-                  ? SafeMemoryImage(bytes: item.thumbnail!, fit: BoxFit.cover)
+                  ? SafeMemoryImage(bytes: item.thumbnail!, fit: BoxFit.cover,
+                      cacheWidth: 200)
                   : Container(color: const Color(0xFF1A1C23)),
               if (controller.isSelecting.value)
                 Positioned(
@@ -345,8 +284,8 @@ class ScreenshotView extends GetView<ScreenshotController> {
     () => Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF0D0F14),
-        border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.07))),
+        color: Get.theme.scaffoldBackgroundColor,
+        border: Border(top: BorderSide(color: Get.theme.dividerColor)),
       ),
       child: controller.isSelecting.value && controller.selectedIds.isNotEmpty
           ? _selectionActions()
@@ -360,8 +299,8 @@ class ScreenshotView extends GetView<ScreenshotController> {
         child: _btn(
           label: 'Aggiorna lista',
           icon: FluentIcons.arrow_clockwise_20_filled,
-          color: Colors.white70,
-          bg: Colors.white.withValues(alpha: 0.07),
+          color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.7),
+          bg: Get.theme.cardColor,
           onTap: controller.loadScreenshots,
         ),
       ),
@@ -397,8 +336,8 @@ class ScreenshotView extends GetView<ScreenshotController> {
         child: _btn(
           label: 'Annulla',
           icon: FluentIcons.dismiss_20_filled,
-          color: Colors.white70,
-          bg: Colors.white.withValues(alpha: 0.07),
+          color: Get.theme.colorScheme.onSurface.withValues(alpha: 0.7),
+          bg: Get.theme.cardColor,
           onTap: controller.toggleSelectionMode,
         ),
       ),

@@ -1,7 +1,6 @@
 import 'package:get/get.dart';
-import 'package:media_cleaner/app/modules/shared/photo_item.dart';
-import 'package:media_cleaner/app/data/service/cache_service.dart';
-import 'package:media_cleaner/app/data/service/photo_service.dart';
+import 'package:media_cleaner/app/service/cache_service.dart';
+import 'package:media_cleaner/app/service/photo_service.dart';
 import 'package:media_cleaner/app/modules/shared/i_media_controller.dart';
 
 enum _A { keep, trash }
@@ -47,6 +46,7 @@ class VideoController extends GetxController implements IMediaController {
 
   Future<void> _initAndLoad() async {
     await _cache.init();
+    _totalFreedBytes.value = _cache.getVideoFreedBytes();
     await loadVideos();
   }
 
@@ -73,12 +73,15 @@ class VideoController extends GetxController implements IMediaController {
     trashCount.value = trashItems.length;
     isLoading.value = false;
 
-    // preload thumbnails in background
+    // Pre-build index map O(1) + aggiornamenti silenziosi per evitare rebuild per-item
+    final allIdx = <String, int>{for (var i = 0; i < allItems.length; i++) allItems[i].id: i};
     await for (final batch in _service.resolveStream(sorted)) {
       for (final r in batch) {
-        final i = allItems.indexWhere((e) => e.id == r.id);
-        if (i >= 0) allItems[i] = r;
+        final i = allIdx[r.id];
+        if (i != null) allItems[i] = r;
       }
+      allItems.refresh();
+      await Future.delayed(Duration.zero);
     }
   }
 
@@ -172,14 +175,18 @@ class VideoController extends GetxController implements IMediaController {
     final del = trashItems.where((p) => ids.contains(p.id)).toList();
     if (del.isEmpty) return 0;
     final done = await _service.deleteAssets(del);
+    int freed = 0;
     for (final id in done) {
-      trashItems.removeWhere((p) => p.id == id);
+      final idx = trashItems.indexWhere((p) => p.id == id);
+      if (idx != -1) { freed += trashItems[idx].sizeBytes; trashItems.removeAt(idx); }
       _ids.remove(id); _trashIds.remove(id);
       allItems.removeWhere((p) => p.id == id);
     }
     trashCount.value = trashItems.length;
-    _cache.saveVideoTrashIds(_trashIds);
-    return done.length;
+    await _cache.addVideoFreedBytes(freed);
+    _totalFreedBytes.value = _cache.getVideoFreedBytes();
+    await _cache.saveVideoTrashIds(_trashIds);
+    return freed;
   }
 
   @override

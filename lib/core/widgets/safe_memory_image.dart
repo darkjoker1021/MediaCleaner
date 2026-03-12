@@ -9,11 +9,15 @@ class SafeMemoryImage extends StatelessWidget {
     required this.bytes,
     this.fit = BoxFit.cover,
     this.placeholder,
+    this.cacheWidth,
+    this.cacheHeight,
   });
 
   final Uint8List bytes;
   final BoxFit fit;
   final Widget? placeholder;
+  final int? cacheWidth;
+  final int? cacheHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -21,6 +25,8 @@ class SafeMemoryImage extends StatelessWidget {
       bytes,
       fit: fit,
       filterQuality: FilterQuality.low,
+      cacheWidth: cacheWidth,
+      cacheHeight: cacheHeight,
       errorBuilder: (_, _, _) {
         return placeholder ??
             Container(
